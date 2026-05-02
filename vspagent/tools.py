@@ -129,11 +129,59 @@ Text:
             print(f"Error fetching Meetup events: {e}")
             return []
 
+class JobSearchTool:
+    """Tool for fetching job listings from Adzuna API"""
+    
+    @staticmethod
+    def search_jobs(query: str, location: str = "Bangalore") -> List[Dict]:
+        """Search for jobs using Adzuna API"""
+        app_id = os.getenv("ADZUNA_APP_ID")
+        app_key = os.getenv("ADZUNA_API_KEY") # Matching your .env name
+        
+        if not app_id or not app_key:
+            print("Error: Adzuna credentials not found in .env")
+            return []
+
+        # Adzuna API for India (in)
+        url = f"https://api.adzuna.com/v1/api/jobs/in/search/1"
+        params = {
+            "app_id": app_id,
+            "app_key": app_key,
+            "results_per_page": 5,
+            "what": query,
+            "where": location,
+            "content-type": "application/json"
+        }
+        
+        try:
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            jobs = []
+            for result in data.get('results', []):
+                jobs.append({
+                    "title": result.get('title'),
+                    "company": result.get('company', {}).get('display_name'),
+                    "location": result.get('location', {}).get('display_name'),
+                    "salary": f"₹{result.get('salary_min')}" if result.get('salary_min') else "Not disclosed",
+                    "url": result.get('redirect_url'),
+                    "description": result.get('description', '')[:200]
+                })
+            return jobs
+        except Exception as e:
+            print(f"Error fetching jobs: {e}")
+            return []
+
 def get_tools_info():
     """Return info about available tools"""
     return {
         "meetup_events": {
             "description": "Finds upcoming events in Bangalore from Meetup.com",
             "function": MeetupTool.fetch_bangalore_events
+        },
+        "job_search": {
+            "description": "Searches for job listings in India",
+            "function": JobSearchTool.search_jobs
         }
     }

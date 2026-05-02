@@ -21,7 +21,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Hi {user.first_name}! 👋\n\n"
         "I am your **VSP Saturday Event Planner**.\n"
         "I can help you find upcoming tech and community events in Bangalore happening on Saturdays.\n\n"
-        "Type /events to see what's happening this weekend!"
+        "Type /events to see what's happening this weekend!\n"
+        "Type /jobs <keyword> to search for job opportunities in Bangalore."
     )
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
@@ -49,6 +50,40 @@ async def fetch_events(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await status_msg.edit_text(f"❌ Error fetching events: {str(e)}")
 
+async def search_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Search for jobs and send them to the user."""
+    query_text = " ".join(context.args)
+    if not query_text:
+        await update.message.reply_text("Please provide a job title. Example: `/jobs Python Developer`", parse_mode='Markdown')
+        return
+
+    status_msg = await update.message.reply_text(f"🔍 Searching for '{query_text}' jobs in Bangalore...")
+    
+    try:
+        from .tools import JobSearchTool
+        jobs = JobSearchTool.search_jobs(query_text)
+        
+        if not jobs:
+            await status_msg.edit_text(f"❌ No '{query_text}' jobs found in Bangalore right now.")
+            return
+
+        response_text = f"💼 **Found {len(jobs)} job opportunities:**\n\n"
+        
+        for i, job in enumerate(jobs, 1):
+            response_text += f"{i}. **[{job['title']}]({job['url']})**\n"
+            response_text += f"   🏢 {job['company']}\n"
+            response_text += f"   💰 {job['salary']}\n"
+            if job['description']:
+                # Simple cleanup of HTML tags if any
+                clean_desc = job['description'].replace('<b>', '').replace('</b>', '').replace('...', '')
+                response_text += f"   📝 _{clean_desc}_\n"
+            response_text += "\n"
+        
+        await status_msg.edit_text(response_text, parse_mode='Markdown', disable_web_page_preview=True)
+
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error fetching jobs: {str(e)}")
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -59,11 +94,13 @@ def main():
     
     start_handler = CommandHandler('start', start)
     events_handler = CommandHandler('events', fetch_events)
+    jobs_handler = CommandHandler('jobs', search_jobs)
     
     application.add_handler(start_handler)
     application.add_handler(events_handler)
+    application.add_handler(jobs_handler)
     
-    print("🚀 VSP Telegram Bot is running...")
+    print("🚀 VSP Telegram Agent is running...")
     application.run_polling()
 
 if __name__ == "__main__":
