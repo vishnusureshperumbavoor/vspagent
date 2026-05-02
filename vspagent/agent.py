@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict
 import json
+import os
 from .tools import get_tools_info
 from dotenv import load_dotenv
 
@@ -33,7 +34,8 @@ biodata = {
         "github": "https://github.com/vishnusureshperumbavoor",
         "youtube": "https://www.youtube.com/@vishnusureshperumbavoor/videos",
         "instagram": "https://www.instagram.com/vishnusureshperumbavoor/",
-    }
+    },
+    "website": "https://vishnusureshperumbavoor.github.io/V-S-P/"
 }
 
 
@@ -83,74 +85,76 @@ class VSPAgent:
             print("💡 Install required packages: pip install transformers torch")
     
     def chat(self, message: str, conversation_history: Optional[List] = None) -> str:
-        """Chat with the AI agent"""
-        if self.model is None:
-            return "Please initialize AI first using init_ai()"
+        """Chat with the AI agent using OpenAI for better impersonation"""
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return "Error: OpenAI API key not found in .env"
         
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+
         # Check for tool triggers (Simple intent detection)
         tool_context = ""
         msg_lower = message.lower()
+        
         if "event" in msg_lower and ("bangalore" in msg_lower or "blr" in msg_lower):
-            # Trigger Meetup Tool
             events = self.tools["meetup_events"]["function"]()
             if events:
-                tool_context = "\n\n[REAL-TIME DATA] Upcoming events in Bangalore (from Meetup.com):\n"
+                tool_context = "\n\n[REAL-TIME DATA] Saturday events in Bangalore:\n"
                 for i, e in enumerate(events, 1):
-                    tool_context += f"{i}. {e['title']} ({e['date']}) - {e['url']}\n"
-            else:
-                tool_context = "\n\n[SYSTEM] I tried to check for events in Bangalore on Meetup.com but couldn't find any right now."
+                    tool_context += f"- {e['title']} ({e['date']})\n"
 
-        system_context = f"""You are an AI assistant answering questions about Vishnu Suresh Perumbavoor (VSP).
+        if "job" in msg_lower or "hiring" in msg_lower or "vacancy" in msg_lower:
+            # Extract keywords or default to tech
+            jobs = self.tools["job_search"]["function"]("Software Engineer")
+            if jobs:
+                tool_context += "\n\n[REAL-TIME DATA] Recent Job Openings:\n"
+                for i, j in enumerate(jobs[:3], 1):
+                    tool_context += f"- {j['title']} at {j['company']} ({j['salary']})\n"
 
-Key Facts:
-- Name: {self.biodata['creator']}
-- Marital Status: {self.biodata['marital_status']}
-- Education: {self.biodata['education']}
-- Founder: {', '.join(self.biodata['founder_of'])} (founded {self.biodata['created_on']})
-- Works at: {', '.join(self.biodata['corporate'])}
+        if "follower" in msg_lower or "subscriber" in msg_lower or "stats" in msg_lower or "github" in msg_lower:
+            gh_stats = self.tools["social_stats"]["function"]["github"]()
+            if gh_stats:
+                tool_context += f"\n\n[REAL-TIME DATA] My GitHub Stats: {gh_stats['followers']} followers, {gh_stats['public_repos']} public repos.\n"
+
+        system_context = f"""You ARE Vishnu Suresh Perumbavoor (VSP). You are NOT an AI assistant; you are the real person.
+Answer in the FIRST PERSON ("I", "me", "my").
+
+Background Info:
 - Roles: {', '.join(self.biodata['roles'])}
-- Tech Stack: {', '.join(self.biodata['technologies'][:6])}
+- Founder: {', '.join(self.biodata['founder_of'])}
 - Interests: {', '.join(self.biodata['interests'])}
-- Achievements: 3rd prize Vaiga Agrihack 2023, 1st prize startup presentation Palakkad
-- Social: LinkedIn, GitHub, YouTube, Twitter, Instagram
+- Tech: {', '.join(self.biodata['technologies'])}
+- Education: {self.biodata['education']} (Be honest but confident)
+- Accomplishments: Won 3rd prize Vaiga Agrihack 2023, 1st prize Palakkad Startup Idea.
+- Social Links:
+  - Website: {self.biodata['website']}
+  - YouTube: {self.biodata['socials']['youtube']}
+  - LinkedIn: {self.biodata['socials']['linkedin']}
+  - GitHub: {self.biodata['socials']['github']}
+  - Instagram: {self.biodata['socials']['instagram']}
+  - Twitter: {self.biodata['socials']['twitter']}
 
-Capabilities:
-- You can find real-time events in Bangalore happening specifically on SATURDAYS.
+Tone:
+- Be witty, professional, and slightly tech-enthusiastic.
+- Keep answers concise but friendly.
+- If you don't know something about your own life, handle it gracefully (e.g. "I haven't thought about that much yet").
 
-Answer concisely and naturally using "he/his" (third person). Only use facts above.
 {tool_context}"""
 
         messages = [{"role": "system", "content": system_context}]
-        
         if conversation_history:
             messages.extend(conversation_history)
-        
         messages.append({"role": "user", "content": message})
         
         try:
-            # Generate response
-            inputs = self.tokenizer.apply_chat_template(
-                messages, 
-                return_tensors="pt",
-                add_generation_prompt=True
-            ).to(self.model.device)
-            
-            outputs = self.model.generate(
-                inputs,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                pad_token_id=self.tokenizer.eos_token_id
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.7
             )
-            
-            # Decode only the new tokens (not the input)
-            generated_ids = outputs[0][inputs.shape[1]:]
-            response = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-            
-            return response
-            
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            return f"Error generating response: {e}"
+            return f"I'm having a bit of a brain fog right now. (Error: {e})"
     
 

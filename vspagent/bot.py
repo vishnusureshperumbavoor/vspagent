@@ -1,7 +1,7 @@
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from .tools import MeetupTool
 from dotenv import load_dotenv
 
@@ -84,6 +84,18 @@ async def search_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await status_msg.edit_text(f"❌ Error fetching jobs: {str(e)}")
 
+async def handle_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle general text messages by chatting as Vishnu."""
+    user_message = update.message.text
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    try:
+        from .agent import VSPAgent
+        agent = VSPAgent()
+        response = agent.chat(user_message)
+        await update.message.reply_text(response)
+    except Exception as e:
+        await update.message.reply_text("I'm a bit busy right now, catch you later! 👋")
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -92,15 +104,13 @@ def main():
 
     application = ApplicationBuilder().token(token).build()
     
-    start_handler = CommandHandler('start', start)
-    events_handler = CommandHandler('events', fetch_events)
-    jobs_handler = CommandHandler('jobs', search_jobs)
+    # Add handlers
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('events', fetch_events))
+    application.add_handler(CommandHandler('jobs', search_jobs))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_chat))
     
-    application.add_handler(start_handler)
-    application.add_handler(events_handler)
-    application.add_handler(jobs_handler)
-    
-    print("🚀 VSP Telegram Agent is running...")
+    print("🚀 VSP Digital Twin is running on Telegram...")
     application.run_polling()
 
 if __name__ == "__main__":

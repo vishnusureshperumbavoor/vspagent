@@ -173,6 +173,21 @@ class JobSearchTool:
             print(f"Error fetching jobs: {e}")
             return []
 
+class SocialStatsTool:
+    """Tool for fetching live social media statistics"""
+    
+    @staticmethod
+    def get_github_stats(username: str = "vishnusureshperumbavoor") -> Dict:
+        """Fetch follower count from GitHub API"""
+        url = f"https://api.github.com/users/{username}"
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return {"followers": data.get("followers", 0), "public_repos": data.get("public_repos", 0)}
+            return {}
+        except: return {}
+
 def get_tools_info():
     """Return info about available tools"""
     return {
@@ -183,5 +198,11 @@ def get_tools_info():
         "job_search": {
             "description": "Searches for job listings in India",
             "function": JobSearchTool.search_jobs
+        },
+        "social_stats": {
+            "description": "Fetches live follower counts",
+            "function": {
+                "github": SocialStatsTool.get_github_stats
+            }
         }
     }
