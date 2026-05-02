@@ -37,13 +37,15 @@ setup(
         "beautifulsoup4>=4.12.0",
         "openai>=1.0.0",
         "python-dotenv>=1.0.0",
+        "fastapi>=0.100.0",
+        "uvicorn>=0.23.0",
     ],
     entry_points={
         "console_scripts": [
             "vspagent-py=vspagent.cli:main",
+            "vsp-planner=vspagent.server:main",
             # Alternative: "pyvspagent=vspagent.cli:main",
         ],
     },
     keywords="ai agent chatbot qwen llm vsp transformers",
 )
-
