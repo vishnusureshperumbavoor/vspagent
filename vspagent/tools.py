@@ -56,8 +56,8 @@ class MeetupTool:
                                         dt = datetime.fromisoformat(date_str)
                                         if dt.weekday() == 5: # 5 is Saturday
                                             is_saturday = True
-                                            # Format to DD:MM:YYYY HOURS:MIN AM/PM
-                                            formatted_date = dt.strftime('%d:%m:%Y %I:%M %p')
+                                            # Format to DD Month YYYY HH:MMAM/PM
+                                            formatted_date = dt.strftime('%d %b %Y %I:%M%p')
                                     except:
                                         # Fallback: simple text check if parsing fails
                                         if "sat" in date_str.lower():
@@ -99,7 +99,7 @@ class MeetupTool:
             prompt = f"""Extract upcoming events from this text from Meetup.com Bangalore. 
 ONLY include events that are happening on a SATURDAY.
 Return ONLY a JSON list of objects with "title", "date", and "url".
-Format the "date" as DD:MM:YYYY HOURS:MIN AM/PM.
+Format the "date" as DD Month YYYY HOURS:MINAM/PM (e.g., 09 May 2026 09:30AM).
 
 Text:
 {body_text}
