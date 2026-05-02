@@ -76,6 +76,12 @@ def main():
             
             # Start spinner and timer
             spinner = Spinner()
+            
+            # Show searching indicator if applicable
+            msg_lower = user_input.lower()
+            if "event" in msg_lower and ("bangalore" in msg_lower or "blr" in msg_lower):
+                print(f"🔍 Searching Meetup.com for events in Bangalore...")
+                
             spinner.start()
             start_time = time.time()
             

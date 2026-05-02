@@ -9,16 +9,28 @@
 ## 🚀 Features
 
 - 🧠 **AI Chat**: Interactive conversations powered by Qwen2.5-0.5B language model
-- 💬 **Natural Language**: Ask anything about VSP in plain English
 - 🧠 **Conversation Memory**: Maintains context throughout the chat session
 - ⚡ **GPU Acceleration**: Automatic GPU support for 30-50x faster responses
 - 🎯 **CLI Interface**: Easy-to-use command-line interface
-- 🐍 **Python API**: Programmatic access for developers
 
 ## 📦 Installation
 
+### From PyPI
 ```bash
 pip install vspagent
+```
+
+### Local Development
+If you want to run the agent from source:
+```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment (Windows)
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ## 🎯 Quick Start
@@ -143,7 +155,7 @@ React, Node.js, FastAPI, Express, MongoDB, Docker, OHIF, Cornerstone3D, VTKjs, D
 - 💼 [LinkedIn](https://www.linkedin.com/in/vishnu-suresh-perumbavoor/)
 - 🐙 [GitHub](https://github.com/vishnusureshperumbavoor)
 - 🐦 [Twitter](https://twitter.com/vspeeeeee)
-- 📺 [YouTube](https://www.youtube.com/@vishnusureshperumbavoor9721/videos)
+- 📺 [YouTube](https://www.youtube.com/@vishnusureshperumbavoor/videos)
 - 📷 [Instagram](https://www.instagram.com/vishnusureshperumbavoor/)
 
 ## 📄 License

@@ -1,6 +1,10 @@
-"""VSP Agent - Core functionality"""
+from typing import List, Optional, Dict
+import json
+from .tools import get_tools_info
+from dotenv import load_dotenv
 
-from typing import List, Optional
+# Load environment variables (for API keys)
+load_dotenv()
 
 # Biodata
 biodata = {
@@ -27,7 +31,7 @@ biodata = {
         "linkedin": "https://www.linkedin.com/in/vishnu-suresh-perumbavoor/",
         "twitter": "https://twitter.com/vspeeeeee",
         "github": "https://github.com/vishnusureshperumbavoor",
-        "youtube": "https://www.youtube.com/@vishnusureshperumbavoor9721/videos",
+        "youtube": "https://www.youtube.com/@vishnusureshperumbavoor/videos",
         "instagram": "https://www.instagram.com/vishnusureshperumbavoor/",
     }
 }
@@ -40,6 +44,7 @@ class VSPAgent:
         self.biodata = biodata
         self.model = None
         self.tokenizer = None
+        self.tools = get_tools_info()
     
     def init_ai(self):
         """Initialize AI model (Qwen2.5-0.5B)"""
@@ -82,6 +87,19 @@ class VSPAgent:
         if self.model is None:
             return "Please initialize AI first using init_ai()"
         
+        # Check for tool triggers (Simple intent detection)
+        tool_context = ""
+        msg_lower = message.lower()
+        if "event" in msg_lower and ("bangalore" in msg_lower or "blr" in msg_lower):
+            # Trigger Meetup Tool
+            events = self.tools["meetup_events"]["function"]()
+            if events:
+                tool_context = "\n\n[REAL-TIME DATA] Upcoming events in Bangalore (from Meetup.com):\n"
+                for i, e in enumerate(events, 1):
+                    tool_context += f"{i}. {e['title']} ({e['date']}) - {e['url']}\n"
+            else:
+                tool_context = "\n\n[SYSTEM] I tried to check for events in Bangalore on Meetup.com but couldn't find any right now."
+
         system_context = f"""You are an AI assistant answering questions about Vishnu Suresh Perumbavoor (VSP).
 
 Key Facts:
@@ -96,7 +114,11 @@ Key Facts:
 - Achievements: 3rd prize Vaiga Agrihack 2023, 1st prize startup presentation Palakkad
 - Social: LinkedIn, GitHub, YouTube, Twitter, Instagram
 
-Answer concisely and naturally using "he/his" (third person). Only use facts above."""
+Capabilities:
+- You can find real-time events in Bangalore if asked.
+
+Answer concisely and naturally using "he/his" (third person). Only use facts above.
+{tool_context}"""
 
         messages = [{"role": "system", "content": system_context}]
         
@@ -115,7 +137,7 @@ Answer concisely and naturally using "he/his" (third person). Only use facts abo
             
             outputs = self.model.generate(
                 inputs,
-                max_new_tokens=256,
+                max_new_tokens=512,
                 do_sample=True,
                 temperature=0.7,
                 top_p=0.9,
