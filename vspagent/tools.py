@@ -6,6 +6,7 @@ import re
 import json
 import os
 from typing import List, Dict, Optional
+from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -47,11 +48,27 @@ class MeetupTool:
                                 date_str = item.get('dateTime', 'Upcoming')
                                 
                                 if title and url_path:
-                                    events.append({
-                                        "title": title,
-                                        "date": date_str,
-                                        "url": url_path if url_path.startswith('http') else f"https://www.meetup.com{url_path}"
-                                    })
+                                    # Filter for Saturdays only
+                                    is_saturday = False
+                                    formatted_date = date_str
+                                    try:
+                                        # Meetup date format: 2026-05-09T09:30:00+05:30
+                                        dt = datetime.fromisoformat(date_str)
+                                        if dt.weekday() == 5: # 5 is Saturday
+                                            is_saturday = True
+                                            # Format to DD:MM:YYYY HOURS:MIN AM/PM
+                                            formatted_date = dt.strftime('%d:%m:%Y %I:%M %p')
+                                    except:
+                                        # Fallback: simple text check if parsing fails
+                                        if "sat" in date_str.lower():
+                                            is_saturday = True
+                                    
+                                    if is_saturday:
+                                        events.append({
+                                            "title": title,
+                                            "date": formatted_date,
+                                            "url": url_path if url_path.startswith('http') else f"https://www.meetup.com{url_path}"
+                                        })
                         if events:
                             return events[:10]
                 except Exception as e:
@@ -80,7 +97,9 @@ class MeetupTool:
             body_text = body_text[:6000] # Reduced from 15000 to save tokens
 
             prompt = f"""Extract upcoming events from this text from Meetup.com Bangalore. 
+ONLY include events that are happening on a SATURDAY.
 Return ONLY a JSON list of objects with "title", "date", and "url".
+Format the "date" as DD:MM:YYYY HOURS:MIN AM/PM.
 
 Text:
 {body_text}
