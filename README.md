@@ -1,17 +1,25 @@
-# 🤖 VSP Agent
+# 🤖 VSP Digital Twin
 
 [![PyPI version](https://badge.fury.io/py/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**AI-powered chat agent about Vishnu Suresh Perumbavoor. Powered by Qwen2.5-0.5B.**
+**Advanced AI-powered Digital Twin of Vishnu Suresh Perumbavoor. Now with agentic capabilities, Telegram integration, and GPT-4o-mini impersonation.**
+
+---
 
 ## 🚀 Features
 
-- 🧠 **AI Chat**: Interactive conversations powered by Qwen2.5-0.5B language model
-- 🧠 **Conversation Memory**: Maintains context throughout the chat session
-- ⚡ **GPU Acceleration**: Automatic GPU support for 30-50x faster responses
-- 🎯 **CLI Interface**: Easy-to-use command-line interface
+- 🧠 **High-Fidelity Impersonation**: Powered by OpenAI's `gpt-4o-mini` for witty, first-person conversations that feel like the real VSP.
+- 🤖 **Telegram Bot**: Integrated Saturday Event Planner and Job Searcher directly on Telegram.
+- 🛠️ **Agentic Tools**:
+  - 📅 **Meetup Scraper**: Real-time Saturday event discovery in Bangalore with AI-powered HTML parsing.
+  - 💼 **Job Searcher**: Live job listings from India using the Adzuna API.
+  - 📊 **Social Stats**: Live follower and repository counts from GitHub.
+- 🧠 **Local Brain Fallback**: Still supports local Qwen2.5-0.5B inference with GPU acceleration.
+- 🎯 **CLI Interface**: Interactive terminal-based chat with real-time tool execution indicators.
+
+---
 
 ## 📦 Installation
 
@@ -20,135 +28,104 @@
 pip install vspagent
 ```
 
-### Local Development
-If you want to run the agent from source:
+### From Source
 ```bash
-# Create virtual environment
-python -m venv venv
+# Clone the repository
+git clone https://github.com/vishnusureshperumbavoor/vsp_bot.git
+cd vsp_bot
 
-# Activate virtual environment (Windows)
-.\venv\Scripts\Activate.ps1
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1  # Windows
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-## 🎯 Quick Start
+### ⚙️ Environment Setup
+Create a `.env` file in the root directory:
+```env
+OPENAI_API_KEY=your_openai_key
+TELEGRAM_BOT_TOKEN=your_bot_token
+ADZUNA_APP_ID=your_adzuna_id
+ADZUNA_API_KEY=your_adzuna_key
+```
 
-### CLI Mode
+---
 
-Simply run:
+## 📱 Telegram Bot Mode
+
+The VSP Digital Twin can run as a Telegram bot to help you plan your weekends!
+
+**To start the bot:**
+```bash
+python -m vspagent.bot
+```
+
+**Commands:**
+- `/start`: Introduction to the VSP Saturday Event Planner.
+- `/events`: Fetches upcoming Saturday events in Bangalore.
+- `/jobs <keyword>`: Searches for job opportunities in Bangalore.
+- `[Text]`: Any other message will trigger a chat session with the VSP Digital Twin.
+
+---
+
+## 🎯 Quick Start (CLI)
+
+Launch an interactive session with the digital twin:
 
 ```bash
 vspagent-py
 ```
 
-This launches an **interactive chat session** with the VSP Agent!
-
-**Example Chat Session:**
+**Example Session:**
 ```
-💬 You: Who is VSP?
-🤖 VSP Agent: VSP stands for Vishnu Suresh Perumbavoor. He is the founder 
-of VSP Enterprises and VSP Intelligence. He's a Software Engineer, Singer, 
-and YouTuber...
+💬 You: Any tech events this Saturday?
+🔍 Searching Meetup.com for events in Bangalore...
+🤖 VSP Agent: I found 5 events for this Saturday! There's a "GenAI Workshop" at Indiranagar 
+and a "React Meetup" in Koramangala. Which one sounds like your vibe?
 
-💬 You: What technologies does he use?
-🤖 VSP Agent: He works with React, Node.js, FastAPI, Docker, MongoDB...
-
-💬 You: What has he accomplished?
-🤖 VSP Agent: He won 3rd prize in Vaiga Agrihack 2023...
-
-💬 You: exit
-👋 Thanks for chatting!
+💬 You: What's your GitHub status?
+🤖 VSP Agent: I'm currently sitting at 124 followers and 42 public repos. 
+Feel free to check out my latest projects!
 ```
 
-**Features:**
-- 🤖 AI-powered conversations with Qwen2.5-0.5B
-- 💬 Natural language understanding
-- 🧠 Conversation memory (maintains context)
-- ⚡ GPU acceleration (30-50x faster if available)
-- 🎯 Simple and focused on chatting about VSP
-
-**Note:** Command is `vspagent-py` (not `vspagent`) to avoid conflicts with the JavaScript version.
-
-### Python API
-
-```python
-from vspagent import VSPAgent, biodata
-
-# Create agent instance
-agent = VSPAgent()
-
-# Initialize AI model (loads Qwen2.5-0.5B)
-agent.init_ai()
-
-# Chat with the agent
-response = agent.chat("Who is VSP?")
-print(response)
-
-# Continue conversation with context
-conversation_history = []
-conversation_history.append({"role": "user", "content": "Who is VSP?"})
-conversation_history.append({"role": "assistant", "content": response})
-
-response2 = agent.chat("What technologies does he use?", conversation_history)
-print(response2)
-
-# Access biodata directly
-print(biodata['creator'])
-print(biodata['technologies'])
-```
+---
 
 ## 📚 API Reference
 
 ### `VSPAgent` Class
 
-#### Methods
+```python
+from vspagent import VSPAgent
 
-- **`init_ai()`**: Initialize the Qwen2.5-0.5B AI model (required before chatting)
-- **`chat(message, conversation_history=None)`**: Chat with the AI agent
-  - `message` (str): Your question or message
-  - `conversation_history` (list, optional): Previous conversation for context
-  - Returns: AI-generated response as string
+agent = VSPAgent()
+# No need to call init_ai() if only using OpenAI-based chat
+response = agent.chat("What are you working on lately?")
+print(response)
+```
 
-### `biodata` Dictionary
+### `tools` Module
 
-Contains comprehensive information about Vishnu Suresh Perumbavoor:
-- Personal information
-- Founder companies
-- Technologies and skills
-- Accomplishments
-- Social media links
+- `MeetupTool.fetch_bangalore_events()`: Returns Saturday events list.
+- `JobSearchTool.search_jobs(query)`: Returns job listings.
+- `SocialStatsTool.get_github_stats()`: Returns live follower counts.
 
-## 🛠️ Requirements
-
-- Python 3.8+
-- transformers >= 4.30.0
-- torch >= 2.0.0
-
-## 🎨 Using the CLI
-
-When running `vspagent-py`:
-- Simply type your questions or messages
-- The AI will respond with information about VSP
-- Type `exit` or `quit` to end the conversation
-- Conversation context is maintained throughout the session
+---
 
 ## 👨‍💻 About VSP
 
-**Vishnu Suresh Perumbavoor** is the founder of VSP Enterprises and VSP Intelligence. He's a:
-- Software Engineer
-- Singer
-- YouTuber
-- Technology enthusiast
+**Vishnu Suresh Perumbavoor** is a Software Engineer, Singer, and YouTuber. He is the founder of **VSP Enterprises** and **VSP Intelligence**.
 
 ### 🏆 Accomplishments
 - Won 3rd prize in Vaiga Agrihack 2023
 - Participated in Rajasthan IT Hackathon 2023
 - Won 1st prize in startup idea presentation at Palakkad
 
-### 🔧 Technologies
-React, Node.js, FastAPI, Express, MongoDB, Docker, OHIF, Cornerstone3D, VTKjs, DICOM
+### 🔧 Tech Stack
+React, Node.js, FastAPI, Docker, OHIF, Cornerstone3D, VTKjs, DICOM
+
+---
 
 ## 🔗 Connect
 
@@ -158,23 +135,12 @@ React, Node.js, FastAPI, Express, MongoDB, Docker, OHIF, Cornerstone3D, VTKjs, D
 - 📺 [YouTube](https://www.youtube.com/@vishnusureshperumbavoor/videos)
 - 📷 [Instagram](https://www.instagram.com/vishnusureshperumbavoor/)
 
+---
+
 ## 📄 License
 
 MIT License - see LICENSE file for details
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 🐛 Issues
-
-Found a bug? [Report it here](https://github.com/vishnusureshperumbavoor/vsp_bot/issues)
-
-## 📈 Version
-
-Current version: **2.2.0**
-
 ---
 
-Made with ❤️ by Vishnu Suresh Perumbavoor
-
+Current version: **2.2.0** | Made with ❤️ by Vishnu Suresh Perumbavoor
