@@ -4,7 +4,7 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Agent Orchestrator & Cloud GPU SDK.**
+**Agent Orchestrator for AI model training and tuning.**
 
 `vspagent` is a lightweight Python agent orchestrator that connects any AI application, web backend, or developer CLI to Google Colab Cloud GPUs (Tesla T4, A100, V100) via the **Model Context Protocol (MCP)** with **zero local VRAM/GPU requirements**.
 
