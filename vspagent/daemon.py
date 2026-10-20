@@ -87,8 +87,8 @@ class VspAgentDaemonHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/colab/status":
-            # If server has never started, start it asynchronously
-            if internal_colab_client.status == "disconnected":
+            # If server has never started or process died, start it asynchronously
+            if not internal_colab_client.proc or internal_colab_client.proc.returncode is not None:
                 try:
                     internal_colab_client.run_sync(internal_colab_client.start(), timeout=30.0)
                 except Exception as e:

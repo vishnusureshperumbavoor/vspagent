@@ -79,8 +79,8 @@ class ColabMCPClient:
 
     def __init__(self):
         self.proc: Optional[asyncio.subprocess.Process] = None
-        self.status = "disconnected"  # disconnected, connecting, connected, error
-        self.status_message = "Not started"
+        self.status = "not_connected"  # not_connected, pairing, connected, disconnected, error
+        self.status_message = "Ready to pair with Colab."
         self.gpu_info: Optional[str] = None
         self.selected_profile: Optional[str] = "Default"
         self.profile_dir: Optional[str] = "Default"
@@ -131,7 +131,7 @@ class ColabMCPClient:
                 except Exception:
                     pass
 
-            self.status = "connecting"
+            self.status = "initializing"
             self.status_message = "Starting internal colab-mcp server..."
             self.log(f"Launching server: {' '.join(SERVER_CMD)}")
 
@@ -185,7 +185,9 @@ class ColabMCPClient:
 
                 await self._send_notification("notifications/initialized", {})
                 await self.refresh_tools()
-                self.status_message = "Server started. Ready to pair with Colab."
+                if not ("add_code_cell" in self.tools and "run_code_cell" in self.tools):
+                    self.status = "not_connected"
+                    self.status_message = "Server started. Ready to pair with Colab."
                 self.log("Internal colab-mcp server initialized successfully.")
 
             except Exception as e:
@@ -297,6 +299,9 @@ class ColabMCPClient:
                 self._connected_event.set()
             if not was_connected and not self.gpu_info:
                 asyncio.create_task(self._probe_gpu_info())
+        elif self.status != "pairing":
+            self.status = "not_connected"
+            self.status_message = "Server started. Ready to pair with Colab."
 
     async def _probe_gpu_info(self):
         """Probes GPU hardware details on the connected runtime."""
@@ -374,12 +379,12 @@ class ColabMCPClient:
             self.tools.clear()
             await self.start(force_restart=True)
         self.log(f"Pairing Colab browser tab with Chrome profile: {self.selected_profile}...")
-        self.status = "connecting"
-        self.status_message = f"Waiting for Colab tab pairing ({self.selected_profile})..."
+        self.status = "pairing"
+        self.status_message = f"Waiting for Colab tab approval ({self.selected_profile})..."
         res = await self.call_tool("open_colab_browser_connection", {})
         await self.refresh_tools()
         return {
-            "status": "connected" if self.status == "connected" else "connecting",
+            "status": "connected" if self.status == "connected" else self.status,
             "profileDirectory": self.selected_profile,
             "connected": self.status == "connected",
             "gpu_info": self.gpu_info,

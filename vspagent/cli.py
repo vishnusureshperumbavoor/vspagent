@@ -102,7 +102,23 @@ def cmd_status(args):
         _print_error(f"Failed to query status: {e}")
         return
 
-    status = (data.get("status") or "unknown").upper()
+    raw_status = (data.get("status") or "unknown").lower()
+    if raw_status in ("not_connected", "ready_to_pair"):
+        status_display = "[bold yellow]NOT CONNECTED (READY TO PAIR)[/bold yellow]"
+        status_text = "NOT CONNECTED (READY TO PAIR)"
+    elif raw_status in ("pairing", "connecting"):
+        status_display = "[bold cyan]PAIRING (WAITING FOR CHROME APPROVAL)[/bold cyan]"
+        status_text = "PAIRING (WAITING FOR CHROME APPROVAL)"
+    elif raw_status == "connected":
+        status_display = "[bold green]CONNECTED[/bold green]"
+        status_text = "CONNECTED"
+    elif raw_status == "disconnected":
+        status_display = "[bold red]DISCONNECTED[/bold red]"
+        status_text = "DISCONNECTED"
+    else:
+        status_display = f"[bold]{raw_status.upper()}[/bold]"
+        status_text = raw_status.upper()
+
     message = data.get("message") or "N/A"
     gpu_info = data.get("gpu_info") or "N/A"
     tools = data.get("tools") or []
@@ -111,7 +127,7 @@ def cmd_status(args):
 
     if HAS_RICH:
         panel_content = (
-            f"[bold]Status:[/bold] {status}\n"
+            f"[bold]Status:[/bold] {status_display}\n"
             f"[bold]Message:[/bold] {message}\n"
             f"[bold]GPU Info:[/bold] {gpu_info}\n"
             f"[bold]Active Tools:[/bold] {', '.join(tools) or 'None'}\n"
@@ -121,7 +137,7 @@ def cmd_status(args):
         console.print(Panel(panel_content, title="[bold cyan]Google Colab MCP Status[/bold cyan]"))
     else:
         print("\nGoogle Colab MCP Status:")
-        print(f"  Status: {status}")
+        print(f"  Status: {status_text}")
         print(f"  Message: {message}")
         print(f"  GPU Info: {gpu_info}")
         print(f"  Active Tools: {tools}")
