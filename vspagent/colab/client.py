@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -82,6 +83,9 @@ class ColabMCPClient:
         self.status_message = "Not started"
         self.gpu_info: Optional[str] = None
         self.selected_profile: Optional[str] = "Default"
+        self.profile_dir: Optional[str] = "Default"
+        self.authuser: Optional[int] = 0
+        self.google_email: Optional[str] = None
         self.tools: Dict[str, Any] = {}
         self.logs: deque = deque(maxlen=300)
 
@@ -322,6 +326,23 @@ class ColabMCPClient:
         }
         return await self._send_request(msg)
 
+    async def select_profile(
+        self,
+        profile_dir: Optional[str] = None,
+        authuser: Optional[int] = None,
+        email: Optional[str] = None,
+    ) -> None:
+        """Selects Chrome profile and account for the next Colab pairing session."""
+        self.profile_dir = profile_dir or "Default"
+        self.selected_profile = self.profile_dir
+        self.authuser = authuser
+        self.google_email = email
+        from vspagent.colab.profiles import set_selected_profile
+        try:
+            set_selected_profile(self.selected_profile)
+        except Exception as e:
+            self.log(f"Profile select warning: {e}")
+
     async def connect_browser(
         self, profile_directory: Optional[str] = None, force: bool = False
     ) -> Dict[str, Any]:
@@ -429,6 +450,79 @@ class ColabMCPClient:
             "isError": is_error,
         }
 
+    async def upload_file_to_colab(self, local_path: str, remote_path: str):
+        """Transfers a local binary file to Google Colab via chunked base64 cells."""
+        with open(local_path, "rb") as f:
+            raw_bytes = f.read()
+        b64_data = base64.b64encode(raw_bytes).decode("ascii")
+        chunk_size = 700_000  # ~700 KB per chunk
+        chunks = [b64_data[i : i + chunk_size] for i in range(0, len(b64_data), chunk_size)]
+        self.log(f"Uploading {os.path.basename(local_path)} ({len(raw_bytes)/1024:.1f} KB) to Colab {remote_path} in {len(chunks)} chunk(s)...")
+
+        tmp_b64 = f"{remote_path}.b64"
+        remote_dir = os.path.dirname(remote_path) or "/content"
+        for idx, chunk in enumerate(chunks):
+            mode = "w" if idx == 0 else "a"
+            is_last = idx == len(chunks) - 1
+            code = (
+                "import base64, os\n"
+                f"os.makedirs({remote_dir!r}, exist_ok=True)\n"
+                f"with open({tmp_b64!r}, {mode!r}) as f:\n"
+                f"    f.write({chunk!r})\n"
+            )
+            if is_last:
+                code += (
+                    f"with open({tmp_b64!r}, 'r') as f_in, open({remote_path!r}, 'wb') as f_out:\n"
+                    "    f_out.write(base64.b64decode(f_in.read()))\n"
+                    f"os.remove({tmp_b64!r})\n"
+                    f"print('UPLOAD_OK:', os.path.getsize({remote_path!r}))\n"
+                )
+            res = await self.execute_code(code, keep_cell=False)
+            if res.get("isError") or (is_last and "UPLOAD_OK:" not in res.get("output", "")):
+                raise RuntimeError(f"Failed uploading {local_path} (chunk {idx+1}/{len(chunks)}) to Colab: {res.get('output')}")
+
+    async def download_file_from_colab(self, remote_path: str, local_path: str):
+        """Downloads a binary file from Google Colab to local_path via chunked base64 slices."""
+        tmp_b64 = f"{remote_path}.b64"
+        prep_code = (
+            "import base64, os\n"
+            f"if not os.path.exists({remote_path!r}):\n"
+            f"    raise FileNotFoundError({remote_path!r})\n"
+            f"with open({remote_path!r}, 'rb') as f:\n"
+            "    b64 = base64.b64encode(f.read()).decode('ascii')\n"
+            f"with open({tmp_b64!r}, 'w') as f:\n"
+            "    f.write(b64)\n"
+            "print(f'B64_LEN:{len(b64)}')\n"
+        )
+        res = await self.execute_code(prep_code, keep_cell=False)
+        out = res.get("output", "")
+        match = re.search(r"B64_LEN:(\d+)", out)
+        if not match:
+            raise RuntimeError(f"Failed preparing download for {remote_path}: {out}")
+        total_len = int(match.group(1))
+        chunk_size = 150_000
+        parts: List[str] = []
+        self.log(f"Downloading {remote_path} ({total_len * 3 // 4 // 1024} KB) from Colab...")
+
+        for offset in range(0, total_len, chunk_size):
+            slice_code = (
+                f"with open({tmp_b64!r}, 'r') as f:\n"
+                f"    f.seek({offset})\n"
+                f"    data = f.read({chunk_size})\n"
+                "print('===B64_START===' + data + '===B64_END===')\n"
+            )
+            slice_res = await self.execute_code(slice_code, keep_cell=False)
+            slice_out = slice_res.get("output", "")
+            m = re.search(r"===B64_START===(.*?)===B64_END===", slice_out, re.S)
+            if not m:
+                raise RuntimeError(f"Failed reading slice at {offset} from Colab: {slice_out[:300]}")
+            parts.append(m.group(1).strip())
+
+        await self.execute_code(f"import os\nif os.path.exists({tmp_b64!r}): os.remove({tmp_b64!r})", keep_cell=False)
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, "wb") as f:
+            f.write(base64.b64decode("".join(parts)))
+
     async def disconnect(self):
         """Terminates the colab-mcp process."""
         if self.proc and self.proc.returncode is None:
@@ -444,6 +538,8 @@ class ColabMCPClient:
         for task in self._reader_tasks:
             task.cancel()
         self._reader_tasks.clear()
+
+    stop = disconnect
 
     @property
     def is_connected(self) -> bool:

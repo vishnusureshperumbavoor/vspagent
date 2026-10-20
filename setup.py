@@ -7,7 +7,7 @@ setup(
     name="vspagent",
     version="3.0.0",
     author="Vishnu Suresh Perumbavoor",
-    description="Universal Google Colab MCP Engine & Remote Cloud GPU Orchestration SDK.",
+    description="Universal Google Colab MCP Agent Orchestrator & Cloud GPU SDK.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/vishnusureshperumbavoor/vspagent",

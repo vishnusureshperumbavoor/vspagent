@@ -234,3 +234,20 @@ def browser_env_command() -> str:
     """Value for BROWSER env var so colab-mcp's webbrowser launches Chrome with selected profile."""
     python = sys.executable
     return f'"{python}" -m vspagent.colab.launcher %s'
+
+
+def discover_chrome_accounts() -> List[Dict[str, Any]]:
+    """Returns a flat list of discovered Google / Chrome accounts with profile_dir, authuser, email."""
+    res = list_chrome_accounts()
+    out: List[Dict[str, Any]] = []
+    for acc in res.get("accounts", []):
+        out.append({
+            "profile_dir": acc.get("profileDirectory"),
+            "email": acc.get("email"),
+            "name": acc.get("name"),
+            "authuser": 0,
+            "label": acc.get("label"),
+            "is_default": acc.get("isDefault", False),
+        })
+    return out
+

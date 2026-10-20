@@ -4,22 +4,25 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Universal Google Colab MCP Engine & Remote Cloud GPU Orchestration SDK.**
+**Agent Orchestrator & Cloud GPU SDK.**
 
-`vspagent` gives any Python app, web server, or CLI instant access to free/pro Google Colab Cloud GPUs (Tesla T4, A100, V100) via the **Model Context Protocol (MCP)** with **zero local VRAM/GPU requirements**.
+`vspagent` is a lightweight Python agent orchestrator that connects any AI application, web backend, or developer CLI to Google Colab Cloud GPUs (Tesla T4, A100, V100) via the **Model Context Protocol (MCP)** with **zero local VRAM/GPU requirements**.
+
+Whether you are orchestrating fine-tuning jobs (ModernBERT, Laya), running deep learning inference (TotalSegmentator, MedGemma), or dispatching heavy audio/vision pipelines (Demucs, Seed-VC), `vspagent` orchestrates the entire cloud GPU lifecycle seamlessly.
 
 ---
 
-## 🌟 Key Features
+## 🌟 Key Capabilities
 
-- 🔗 **Zero-Configuration Colab MCP Handshake**: Automatically manages the `colab-mcp` stdio subprocess and JSON-RPC lifecycle.
-- 👤 **Cross-Platform Chrome Profile Detection**: Detects all signed-in Google/Gmail accounts across Linux native, WSL, Windows, and macOS, opening pairing in the exact profile chosen.
-- 🚀 **Remote GPU Execution**: Programmatically injects, executes, polls, and deletes code cells on Google Colab with structured output and traceback handling.
-- 🔌 **Pre-Built Web Framework Adapters**:
-  - **FastAPI**: One-line `include_router(get_colab_router())` providing ready-to-use `/colab/status`, `/colab/accounts`, `/colab/connect`, `/colab/execute` endpoints.
-  - **Flask**: One-line `register_blueprint(get_colab_blueprint())` supporting synchronous multi-threaded Flask servers.
-- 🖥️ **Built-in CLI**: Interactive terminal utility with live account discovery, status dashboards, and code execution.
-- 🪶 **Ultra-Lightweight**: Zero local PyTorch, CUDA, or transformers dependencies. Local package size is under 1MB.
+- 🤖 **Agentic MCP Orchestration**: Manages the `colab-mcp` stdio daemon, JSON-RPC protocol, and tool invocations behind clean, Pythonic abstractions.
+- 👤 **Intelligent Account & Profile Routing**: Automatically detects signed-in Google/Chrome profiles across Linux, WSL, Windows, and macOS, dispatching browser pairing to the desired Google account.
+- 🚀 **Remote Cloud GPU Dispatch**: Injects, monitors, and cleans up remote execution payloads on Colab runtimes with real-time log streaming and traceback extraction.
+- 📁 **Automated Cloud File Transfer**: High-speed, chunked bidirectional file synchronization between local storage and remote Colab file systems.
+- 🔌 **Drop-in Web Framework Adapters**:
+  - **FastAPI**: One-line `app.include_router(get_colab_router())` providing ready-to-use `/colab/status`, `/colab/accounts`, `/colab/connect`, `/colab/execute` endpoints.
+  - **Flask**: One-line `app.register_blueprint(get_colab_blueprint())` supporting synchronous multi-threaded Flask backends.
+- 🖥️ **Interactive Terminal CLI**: Built-in developer CLI with rich tables, live account discovery, connection health checks, and direct code dispatch.
+- 🪶 **Zero-Dependency Local Footprint**: Keeps local environments clean (<1MB). Heavy machine learning dependencies (`torch`, `cuda`, `transformers`) stay isolated on the remote cloud GPU.
 
 ---
 
@@ -29,7 +32,7 @@
 pip install vspagent
 ```
 
-For web framework support:
+### Framework Extensions:
 ```bash
 # With FastAPI support
 pip install "vspagent[fastapi]"
@@ -37,7 +40,7 @@ pip install "vspagent[fastapi]"
 # With Flask support
 pip install "vspagent[flask]"
 
-# With all integrations
+# With all adapters
 pip install "vspagent[all]"
 ```
 
@@ -45,7 +48,7 @@ pip install "vspagent[all]"
 
 ## 🛠️ Quickstart
 
-### 1. Python SDK
+### 1. Python SDK — Direct Agent Orchestration
 
 ```python
 import asyncio
@@ -54,30 +57,30 @@ from vspagent import ColabClient
 async def main():
     colab = ColabClient()
     
-    # Connect with preferred Chrome profile (or Default)
-    print("Connecting to Google Colab...")
+    # 1. Orchestrate pairing with the user's preferred Google account
+    print("Initiating Colab agent handshake...")
     await colab.connect_browser(profile_directory="Default")
     
-    # Wait until user approves pairing in Chrome tab
+    # 2. Await tab authorization in Chrome
     await colab.ensure_connected(timeout=60.0)
-    print(f"Connected! GPU: {colab.gpu_info}")
+    print(f"Connected to Cloud GPU: {colab.gpu_info}")
     
-    # Execute code on remote cloud GPU
-    code = """
+    # 3. Dispatch remote GPU execution
+    payload = """
 import torch
-print("Hello from Colab GPU:", torch.cuda.get_device_name(0))
+print("Agent GPU Ready:", torch.cuda.get_device_name(0))
     """
-    res = await colab.execute_code(code, keep_cell=False)
-    print("Output:\n", res["output"])
+    res = await colab.execute_code(payload, keep_cell=False)
+    print("Remote Output:\n", res["output"])
 
 asyncio.run(main())
 ```
 
 ---
 
-### 2. FastAPI Web Integration (e.g. Vibe-ML-Studio, Vibe-MI-Stdio)
+### 2. FastAPI Web Orchestration (e.g. Vibe-ML-Studio, Vibe-MI-Stdio)
 
-Mount the pre-built router directly onto your FastAPI application:
+Mount the orchestrator directly into your FastAPI application:
 
 ```python
 from fastapi import FastAPI
@@ -85,13 +88,13 @@ from vspagent.colab.integrations import get_colab_router
 
 app = FastAPI(title="My GPU-Accelerated Service")
 
-# Mounts /colab/status, /colab/accounts, /colab/connect, /colab/execute
+# Exposes /colab/status, /colab/accounts, /colab/connect, /colab/execute
 app.include_router(get_colab_router(), prefix="/api")
 ```
 
 ---
 
-### 3. Flask Web Integration (e.g. Karaoke Extractor)
+### 3. Flask Web Orchestration (e.g. Karaoke Extractor)
 
 ```python
 from flask import Flask
@@ -99,7 +102,7 @@ from vspagent.colab.integrations import get_colab_blueprint
 
 app = Flask(__name__)
 
-# Mounts /colab/status, /colab/accounts, /colab/connect, /colab/execute
+# Exposes /colab/status, /colab/accounts, /colab/connect, /colab/execute
 app.register_blueprint(get_colab_blueprint(), url_prefix="/api/colab")
 ```
 
@@ -108,20 +111,20 @@ app.register_blueprint(get_colab_blueprint(), url_prefix="/api/colab")
 ### 4. Interactive Terminal CLI
 
 ```bash
-# 1. Discover available Google / Chrome accounts
+# Discover available Google / Chrome profiles
 vspagent colab accounts
 
-# 2. Check connection status and GPU hardware
+# Inspect Colab MCP orchestrator status & GPU hardware
 vspagent colab status
 
-# 3. Interactively connect to Colab tab
+# Interactively pair terminal session with Colab tab
 vspagent colab connect
 
-# 4. Execute Python code directly on remote Colab GPU
+# Dispatch inline code to Colab GPU
 vspagent colab exec -c "import torch; print(torch.cuda.is_available())"
 
-# Or run a complete Python script file
-vspagent colab exec -f ./train_decision_model.py
+# Dispatch a local Python script to remote Colab GPU
+vspagent colab exec -f ./train_model.py
 ```
 
 ---

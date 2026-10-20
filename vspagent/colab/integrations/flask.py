@@ -1,4 +1,4 @@
-"""Flask integration blueprint for vspagent Google Colab MCP engine."""
+"""Flask integration blueprint for vspagent Google Colab MCP agent orchestrator."""
 
 from __future__ import annotations
 

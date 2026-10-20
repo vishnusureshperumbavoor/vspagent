@@ -1,4 +1,4 @@
-"""Command Line Interface for vspagent: Google Colab MCP engine."""
+"""Command Line Interface for vspagent: Google Colab MCP Agent Orchestrator."""
 
 from __future__ import annotations
 

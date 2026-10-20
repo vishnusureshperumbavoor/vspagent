@@ -1,4 +1,4 @@
-# vspagent: Universal Google Colab MCP Engine & Remote Cloud GPU Orchestration SDK
+# vspagent: Universal Google Colab MCP Agent Orchestrator & Cloud GPU SDK
 # Core dependencies (lightweight, zero local GPU/VRAM needed)
 pydantic>=1.10.0
 rich>=12.0.0
