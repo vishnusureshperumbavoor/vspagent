@@ -1,4 +1,4 @@
-"""vspagent Google Colab MCP agent orchestrator."""
+"""vspagent Google Colab MCP agent harness."""
 
 from vspagent.colab.client import ColabClient, ColabMCPClient, internal_colab_client
 from vspagent.colab.profiles import (

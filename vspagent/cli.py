@@ -1,12 +1,12 @@
-"""Command Line Interface for vspagent: Google Colab MCP Agent Orchestrator."""
+"""Command Line Interface for vspagent: Google Colab MCP Agent Harness."""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import sys
 import time
+from pathlib import Path
 
 try:
     from rich.console import Console
@@ -19,8 +19,17 @@ except ImportError:
     HAS_RICH = False
     console = None
 
-from vspagent.colab.client import internal_colab_client
-from vspagent.colab.profiles import list_chrome_accounts, set_selected_profile
+from vspagent import __version__
+from vspagent.colab.profiles import list_chrome_accounts
+from vspagent.daemon import (
+    DAEMON_LOG_FILE,
+    daemon_request,
+    ensure_daemon_running,
+    get_daemon_info,
+    is_daemon_running,
+    run_daemon_server,
+    stop_daemon,
+)
 
 
 def _print_info(msg: str):
@@ -71,7 +80,7 @@ def cmd_accounts(args):
                 acc["profileDirectory"],
                 acc["email"] or "—",
                 acc["name"] or "—",
-                "★" if acc["isDefault"] else ""
+                "★" if acc["isDefault"] else "",
             )
         console.print(table)
         console.print(f"[dim]User Data: {user_data}[/dim]")
@@ -86,34 +95,42 @@ def cmd_accounts(args):
 
 
 def cmd_status(args):
-    """Inspect current Colab MCP bridge state."""
-    async def _check():
-        await internal_colab_client.start()
-        await asyncio.sleep(1.0)
-        return internal_colab_client
+    """Inspect current Colab MCP bridge state via background daemon."""
+    try:
+        data = daemon_request("GET", "/colab/status", auto_start=True)
+    except Exception as e:
+        _print_error(f"Failed to query status: {e}")
+        return
 
-    client = asyncio.run(_check())
+    status = (data.get("status") or "unknown").upper()
+    message = data.get("message") or "N/A"
+    gpu_info = data.get("gpu_info") or "N/A"
+    tools = data.get("tools") or []
+    profile = data.get("selected_profile") or "Default"
+    daemon_pid = data.get("daemon_pid")
 
     if HAS_RICH:
         panel_content = (
-            f"[bold]Status:[/bold] {client.status.upper()}\n"
-            f"[bold]Message:[/bold] {client.status_message}\n"
-            f"[bold]GPU Info:[/bold] {client.gpu_info or 'N/A'}\n"
-            f"[bold]Active Tools:[/bold] {', '.join(client.tools.keys()) or 'None'}\n"
-            f"[bold]Selected Profile:[/bold] {client.selected_profile or 'Default'}"
+            f"[bold]Status:[/bold] {status}\n"
+            f"[bold]Message:[/bold] {message}\n"
+            f"[bold]GPU Info:[/bold] {gpu_info}\n"
+            f"[bold]Active Tools:[/bold] {', '.join(tools) or 'None'}\n"
+            f"[bold]Selected Profile:[/bold] {profile}\n"
+            f"[dim]Daemon PID: {daemon_pid}[/dim]"
         )
         console.print(Panel(panel_content, title="[bold cyan]Google Colab MCP Status[/bold cyan]"))
     else:
         print("\nGoogle Colab MCP Status:")
-        print(f"  Status: {client.status}")
-        print(f"  Message: {client.status_message}")
-        print(f"  GPU Info: {client.gpu_info or 'N/A'}")
-        print(f"  Active Tools: {list(client.tools.keys())}")
-        print(f"  Profile: {client.selected_profile}\n")
+        print(f"  Status: {status}")
+        print(f"  Message: {message}")
+        print(f"  GPU Info: {gpu_info}")
+        print(f"  Active Tools: {tools}")
+        print(f"  Profile: {profile}")
+        print(f"  Daemon PID: {daemon_pid}\n")
 
 
 def cmd_connect(args):
-    """Interactively select a profile and pair with Google Colab tab."""
+    """Interactively select a profile and pair with Google Colab tab via daemon."""
     accounts_data = list_chrome_accounts()
     accounts = accounts_data.get("accounts", [])
 
@@ -139,22 +156,20 @@ def cmd_connect(args):
     chosen_profile = chosen_profile or "Default"
     _print_info(f"Initiating Google Colab pairing with profile: '{chosen_profile}'...")
 
-    async def _connect():
-        res = await internal_colab_client.connect_browser(
-            profile_directory=chosen_profile, force=args.force
+    def _do_connect():
+        return daemon_request(
+            "POST",
+            "/colab/connect",
+            payload={
+                "profileDirectory": chosen_profile,
+                "force": args.force,
+                "timeout": args.timeout,
+            },
+            timeout=args.timeout + 20.0,
+            auto_start=True,
         )
-        if internal_colab_client.status == "connected":
-            return True
 
-        # Wait for user approval in Chrome
-        deadline = time.time() + args.timeout
-        while time.time() < deadline:
-            await asyncio.sleep(2.0)
-            if internal_colab_client.status == "connected":
-                return True
-        return False
-
-    success = False
+    res = None
     if HAS_RICH:
         with Progress(
             SpinnerColumn(),
@@ -162,18 +177,28 @@ def cmd_connect(args):
             console=console,
             transient=True,
         ) as progress:
-            task = progress.add_task("Waiting for Colab tab approval in Chrome...", total=None)
-            success = asyncio.run(_connect())
+            progress.add_task("Waiting for Colab tab approval in Chrome...", total=None)
+            try:
+                res = _do_connect()
+            except Exception as e:
+                _print_error(f"Connection failed: {e}")
+                return
     else:
         print("Waiting for Colab tab pairing (approve in Chrome)...")
-        success = asyncio.run(_connect())
+        try:
+            res = _do_connect()
+        except Exception as e:
+            _print_error(f"Connection failed: {e}")
+            return
 
-    if success:
+    if res and res.get("connected"):
         _print_success("Connected to Google Colab Cloud GPU session!")
-        if internal_colab_client.gpu_info:
-            _print_info(f"Hardware: {internal_colab_client.gpu_info}")
+        gpu_info = res.get("gpu_info")
+        if gpu_info:
+            _print_info(f"Hardware: {gpu_info}")
     else:
-        _print_error(f"Pairing timed out after {args.timeout}s. Keep the Colab tab open and try again.")
+        msg = (res.get("message") if res else "") or f"Pairing timed out after {args.timeout}s."
+        _print_error(f"{msg} Keep the Colab tab open and try again.")
 
 
 def cmd_exec(args):
@@ -191,13 +216,16 @@ def cmd_exec(args):
         _print_error("No code provided. Use -c 'code' or -f script.py")
         return
 
-    _print_info("Dispatching code to Google Colab GPU...")
-
-    async def _run():
-        return await internal_colab_client.execute_code(code, keep_cell=not args.temp)
+    _print_info("Dispatching code to Google Colab GPU via background daemon...")
 
     try:
-        res = asyncio.run(_run())
+        res = daemon_request(
+            "POST",
+            "/colab/execute",
+            payload={"code": code, "keep_cell": not args.temp, "timeout": 3600.0},
+            timeout=3610.0,
+            auto_start=True,
+        )
         if res.get("isError"):
             _print_error("Remote execution encountered an error:")
             print(res.get("output", ""))
@@ -208,15 +236,73 @@ def cmd_exec(args):
         _print_error(f"Execution failed: {e}")
 
 
+def cmd_disconnect(args):
+    """Disconnect active Google Colab GPU session."""
+    try:
+        res = daemon_request("POST", "/colab/disconnect", auto_start=False)
+        _print_success(res.get("message", "Colab session disconnected."))
+    except Exception as e:
+        _print_error(f"Failed to disconnect: {e}")
+
+
+def cmd_daemon(args):
+    """Manage background daemon."""
+    sub = args.daemon_command
+    if sub == "status":
+        info = get_daemon_info()
+        running = is_daemon_running()
+        if running and info:
+            if HAS_RICH:
+                content = (
+                    f"[bold]Status:[/bold] RUNNING\n"
+                    f"[bold]PID:[/bold] {info.get('pid')}\n"
+                    f"[bold]Base URL:[/bold] {info.get('base_url')}\n"
+                    f"[bold]Version:[/bold] {info.get('version')}\n"
+                    f"[bold]Log File:[/bold] {DAEMON_LOG_FILE}"
+                )
+                console.print(Panel(content, title="[bold cyan]vspagent Daemon Status[/bold cyan]"))
+            else:
+                print(f"Daemon Status: RUNNING (PID: {info.get('pid')}, URL: {info.get('base_url')})")
+        else:
+            print("Daemon Status: STOPPED")
+    elif sub == "start":
+        info = ensure_daemon_running()
+        _print_success(f"Daemon running at {info.get('base_url')} (PID: {info.get('pid')})")
+    elif sub == "stop":
+        if stop_daemon():
+            _print_success("Daemon stopped.")
+        else:
+            _print_info("Daemon was not running.")
+    elif sub == "restart":
+        stop_daemon()
+        time.sleep(1.0)
+        info = ensure_daemon_running()
+        _print_success(f"Daemon restarted at {info.get('base_url')} (PID: {info.get('pid')})")
+    elif sub == "logs":
+        if not DAEMON_LOG_FILE.exists():
+            print("No log file found.")
+            return
+        lines = DAEMON_LOG_FILE.read_text(encoding="utf-8").splitlines()[-40:]
+        print("\n".join(lines))
+    else:
+        print("Usage: vspagent daemon {status,start,stop,restart,logs}")
+
+
+def cmd_serve(args):
+    """Run daemon in foreground."""
+    run_daemon_server(host=args.host, port=args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="vspagent",
-        description="vspagent: Zero-local-GPU Cloud Orchestration via Google Colab MCP",
+        description="vspagent: Zero-local-GPU Cloud Agent Harness via Google Colab MCP",
     )
-    parser.add_argument("--version", action="version", version="vspagent 3.0.2")
+    parser.add_argument("--version", action="version", version=f"vspagent {__version__}")
 
     subparsers = parser.add_subparsers(dest="subcommand")
 
+    # colab commands
     colab_parser = subparsers.add_parser("colab", help="Colab MCP commands")
     colab_subs = colab_parser.add_subparsers(dest="colab_command")
 
@@ -238,6 +324,23 @@ def main():
     exec_p.add_argument("-f", "--file", help="Python file path to execute remotely")
     exec_p.add_argument("--temp", action="store_true", help="Delete the cell after execution")
 
+    # disconnect
+    colab_subs.add_parser("disconnect", help="Disconnect active Colab session")
+
+    # daemon commands
+    daemon_parser = subparsers.add_parser("daemon", help="Manage background daemon")
+    daemon_subs = daemon_parser.add_subparsers(dest="daemon_command")
+    daemon_subs.add_parser("status", help="Show daemon status")
+    daemon_subs.add_parser("start", help="Start background daemon")
+    daemon_subs.add_parser("stop", help="Stop background daemon")
+    daemon_subs.add_parser("restart", help="Restart background daemon")
+    daemon_subs.add_parser("logs", help="View recent daemon logs")
+
+    # serve command
+    serve_parser = subparsers.add_parser("serve", help="Run vspagent daemon server in foreground")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=4096, help="Port to bind (default: 4096)")
+
     args = parser.parse_args()
 
     if args.subcommand == "colab":
@@ -249,8 +352,14 @@ def main():
             cmd_connect(args)
         elif args.colab_command == "exec":
             cmd_exec(args)
+        elif args.colab_command == "disconnect":
+            cmd_disconnect(args)
         else:
             colab_parser.print_help()
+    elif args.subcommand == "daemon":
+        cmd_daemon(args)
+    elif args.subcommand == "serve":
+        cmd_serve(args)
     else:
         parser.print_help()
 

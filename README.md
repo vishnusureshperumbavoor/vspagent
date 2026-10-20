@@ -4,24 +4,25 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Agent Orchestrator for AI model training and tuning.**
+**Hybrid Agent Harness & Cloud GPU Execution Runtime.**
 
-`vspagent` is a lightweight Python agent orchestrator that connects any AI application, web backend, or developer CLI to Google Colab Cloud GPUs (Tesla T4, A100, V100) via the **Model Context Protocol (MCP)** with **zero local VRAM/GPU requirements**.
+`vspagent` is a lightweight, extensible agent harness that bridges local development environments, web backends, and AI coding agents to Google Colab Cloud GPUs (Tesla T4, A100, V100) via the **Model Context Protocol (MCP)** with **zero local VRAM/GPU requirements**.
 
-Whether you are orchestrating fine-tuning jobs (ModernBERT, Laya), running deep learning inference (TotalSegmentator, MedGemma), or dispatching heavy audio/vision pipelines (Demucs, Seed-VC), `vspagent` orchestrates the entire cloud GPU lifecycle seamlessly.
+Whether you are fine-tuning models (ModernBERT, Laya), running deep learning inference (TotalSegmentator, MedGemma), or dispatching heavy audio/vision pipelines (Demucs, Seed-VC), `vspagent` acts as your execution harness—managing background daemons, MCP protocol bridges, and cloud GPU runtimes seamlessly.
 
 ---
 
 ## 🌟 Key Capabilities
 
-- 🤖 **Agentic MCP Orchestration**: Manages the `colab-mcp` stdio daemon, JSON-RPC protocol, and tool invocations behind clean, Pythonic abstractions.
+- 🤖 **Agentic MCP Runtime Harness**: Manages the `colab-mcp` stdio daemon, JSON-RPC protocol, tool registry, and background execution behind clean, Pythonic abstractions.
+- ⚙️ **Persistent Background Daemon**: Auto-spawning local daemon that preserves browser pairings, tool availability, and GPU sessions across separate terminal commands.
 - 👤 **Intelligent Account & Profile Routing**: Automatically detects signed-in Google/Chrome profiles across Linux, WSL, Windows, and macOS, dispatching browser pairing to the desired Google account.
 - 🚀 **Remote Cloud GPU Dispatch**: Injects, monitors, and cleans up remote execution payloads on Colab runtimes with real-time log streaming and traceback extraction.
 - 📁 **Automated Cloud File Transfer**: High-speed, chunked bidirectional file synchronization between local storage and remote Colab file systems.
 - 🔌 **Drop-in Web Framework Adapters**:
   - **FastAPI**: One-line `app.include_router(get_colab_router())` providing ready-to-use `/colab/status`, `/colab/accounts`, `/colab/connect`, `/colab/execute` endpoints.
   - **Flask**: One-line `app.register_blueprint(get_colab_blueprint())` supporting synchronous multi-threaded Flask backends.
-- 🖥️ **Interactive Terminal CLI**: Built-in developer CLI with rich tables, live account discovery, connection health checks, and direct code dispatch.
+- 🖥️ **Interactive Terminal CLI**: Built-in developer CLI with rich tables, live account discovery, connection health checks, daemon management, and direct code dispatch.
 - 🪶 **Zero-Dependency Local Footprint**: Keeps local environments clean (<1MB). Heavy machine learning dependencies (`torch`, `cuda`, `transformers`) stay isolated on the remote cloud GPU.
 
 ---
@@ -30,13 +31,15 @@ Whether you are orchestrating fine-tuning jobs (ModernBERT, Laya), running deep 
 
 ```bash
 pip install vspagent
+# or using uv:
+uv tool install vspagent
 ```
 
 ---
 
 ## 🛠️ Quickstart
 
-### 1. Python SDK — Direct Agent Orchestration
+### 1. Python SDK — Direct Agent Harness
 
 ```python
 import asyncio
@@ -45,7 +48,7 @@ from vspagent import ColabClient
 async def main():
     colab = ColabClient()
     
-    # 1. Orchestrate pairing with the user's preferred Google account
+    # 1. Connect harness with the user's preferred Google account
     print("Initiating Colab agent handshake...")
     await colab.connect_browser(profile_directory="Default")
     
@@ -66,9 +69,9 @@ asyncio.run(main())
 
 ---
 
-### 2. FastAPI Web Orchestration (e.g. Vibe-ML-Studio, Vibe-MI-Stdio)
+### 2. FastAPI Web Harness (e.g. Vibe-ML-Studio, Vibe-MI-Stdio)
 
-Mount the orchestrator directly into your FastAPI application:
+Mount the harness router directly into your FastAPI application:
 
 ```python
 from fastapi import FastAPI
@@ -82,7 +85,7 @@ app.include_router(get_colab_router(), prefix="/api")
 
 ---
 
-### 3. Flask Web Orchestration (e.g. Karaoke Extractor)
+### 3. Flask Web Harness (e.g. Karaoke Extractor)
 
 ```python
 from flask import Flask
@@ -96,23 +99,28 @@ app.register_blueprint(get_colab_blueprint(), url_prefix="/api/colab")
 
 ---
 
-### 4. Interactive Terminal CLI
+### 4. Interactive Terminal CLI & Daemon
 
 ```bash
 # Discover available Google / Chrome profiles
 vspagent colab accounts
 
-# Inspect Colab MCP orchestrator status & GPU hardware
-vspagent colab status
-
-# Interactively pair terminal session with Colab tab
+# Pair terminal session with Colab tab (persisted in background daemon)
 vspagent colab connect
+
+# Inspect Colab MCP harness status & GPU hardware
+vspagent colab status
 
 # Dispatch inline code to Colab GPU
 vspagent colab exec -c "import torch; print(torch.cuda.is_available())"
 
 # Dispatch a local Python script to remote Colab GPU
 vspagent colab exec -f ./train_model.py
+
+# Daemon management
+vspagent daemon status
+vspagent daemon logs
+vspagent daemon stop
 ```
 
 ---

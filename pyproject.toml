@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vspagent"
-version = "3.0.2"
-description = "Universal Google Colab MCP Agent Orchestrator & Cloud GPU SDK."
+version = "3.1.0"
+description = "Universal Google Colab MCP Agent Harness & Cloud GPU SDK."
 readme = "README.md"
 authors = [{ name = "Vishnu Suresh Perumbavoor" }]
 license = { text = "MIT" }

@@ -1,4 +1,4 @@
-"""FastAPI integration router for vspagent Google Colab MCP agent orchestrator."""
+"""FastAPI integration router for vspagent Google Colab MCP agent harness."""
 
 from __future__ import annotations
 

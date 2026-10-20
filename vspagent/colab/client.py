@@ -256,6 +256,16 @@ class ColabMCPClient:
                     self.log("Tools changed. Refreshing...")
                     asyncio.create_task(self.refresh_tools())
 
+        # If stdout reached EOF unexpectedly, clean up state and fail pending futures
+        for fut in list(self._pending_futures.values()):
+            if not fut.done():
+                fut.set_exception(RuntimeError("Colab MCP subprocess exited"))
+        if self.status != "disconnected":
+            self.status = "disconnected"
+            self.status_message = "Colab MCP process exited"
+            self.gpu_info = None
+            self.tools.clear()
+
     async def _read_stderr(self):
         while self.proc and self.proc.stderr:
             line = await self.proc.stderr.readline()
@@ -359,6 +369,10 @@ class ColabMCPClient:
 
         selected = set_selected_profile(profile_directory)
         self.selected_profile = selected.get("profileDirectory") or "Default"
+        if force and self.proc and self.proc.returncode is None:
+            self.gpu_info = None
+            self.tools.clear()
+            await self.start(force_restart=True)
         self.log(f"Pairing Colab browser tab with Chrome profile: {self.selected_profile}...")
         self.status = "connecting"
         self.status_message = f"Waiting for Colab tab pairing ({self.selected_profile})..."
