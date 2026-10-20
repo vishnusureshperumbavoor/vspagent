@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="vspagent",
-    version="3.0.1",
+    version="3.0.2",
     author="Vishnu Suresh Perumbavoor",
     description="Universal Google Colab MCP Agent Orchestrator & Cloud GPU SDK.",
     long_description=long_description,
@@ -34,9 +34,6 @@ setup(
     install_requires=[
         "pydantic>=1.10.0",
         "rich>=12.0.0",
-        "fastapi>=0.100.0",
-        "uvicorn>=0.20.0",
-        "flask>=2.0.0",
     ],
     entry_points={
         "console_scripts": [

@@ -213,7 +213,7 @@ def main():
         prog="vspagent",
         description="vspagent: Zero-local-GPU Cloud Orchestration via Google Colab MCP",
     )
-    parser.add_argument("--version", action="version", version="vspagent 3.0.1")
+    parser.add_argument("--version", action="version", version="vspagent 3.0.2")
 
     subparsers = parser.add_subparsers(dest="subcommand")
 
