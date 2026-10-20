@@ -1,6 +1,6 @@
 """vspagent: Universal Google Colab MCP Agent Orchestrator & Cloud GPU SDK."""
 
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 __author__ = "Vishnu Suresh Perumbavoor"
 
 from vspagent.colab.client import ColabClient, ColabMCPClient, internal_colab_client

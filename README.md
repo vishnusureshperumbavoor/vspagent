@@ -32,18 +32,6 @@ Whether you are orchestrating fine-tuning jobs (ModernBERT, Laya), running deep 
 pip install vspagent
 ```
 
-### Framework Extensions:
-```bash
-# With FastAPI support
-pip install "vspagent[fastapi]"
-
-# With Flask support
-pip install "vspagent[flask]"
-
-# With all adapters
-pip install "vspagent[all]"
-```
-
 ---
 
 ## 🛠️ Quickstart
