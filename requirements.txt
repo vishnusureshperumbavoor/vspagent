@@ -1,17 +1,14 @@
-# VSP Agent - Core Dependencies
-# transformers>=4.30.0
-# torch>=2.0.0
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-openai>=1.0.0
-python-dotenv>=1.0.0
-fastapi>=0.100.0
-uvicorn>=0.23.0
-python-telegram-bot>=20.0
+# vspagent: Universal Google Colab MCP Engine & Remote Cloud GPU Orchestration SDK
+# Core dependencies (lightweight, zero local GPU/VRAM needed)
+pydantic>=1.10.0
+rich>=12.0.0
 
-# Development Dependencies
+# Optional Web Integration Frameworks (install as needed)
+# fastapi>=0.100.0
+# flask>=2.0.0
+
+# Packaging / Distribution
 build>=0.10.0
 twine>=4.0.0
 setuptools>=65.0.0
 wheel>=0.38.0
-

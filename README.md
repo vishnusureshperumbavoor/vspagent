@@ -1,146 +1,131 @@
-# 🤖 VSP Digital Twin
+# ⚡ vspagent
 
 [![PyPI version](https://badge.fury.io/py/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/vspagent.svg)](https://pypi.org/project/vspagent/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Advanced AI-powered Digital Twin of Vishnu Suresh Perumbavoor. Now with agentic capabilities, Telegram integration, and GPT-4o-mini impersonation.**
+**Universal Google Colab MCP Engine & Remote Cloud GPU Orchestration SDK.**
+
+`vspagent` gives any Python app, web server, or CLI instant access to free/pro Google Colab Cloud GPUs (Tesla T4, A100, V100) via the **Model Context Protocol (MCP)** with **zero local VRAM/GPU requirements**.
 
 ---
 
-## 🚀 Features
+## 🌟 Key Features
 
-- 🧠 **High-Fidelity Impersonation**: Powered by OpenAI's `gpt-4o-mini` for witty, first-person conversations that feel like the real VSP.
-- 🤖 **Telegram Bot**: Integrated Saturday Event Planner and Job Searcher directly on Telegram.
-- 🛠️ **Agentic Tools**:
-  - 📅 **Meetup Scraper**: Real-time Saturday event discovery in Bangalore with AI-powered HTML parsing.
-  - 💼 **Job Searcher**: Live job listings from India using the Adzuna API.
-  - 📊 **Social Stats**: Live follower and repository counts from GitHub.
-- 🧠 **Local Brain Fallback**: Still supports local Qwen2.5-0.5B inference with GPU acceleration.
-- 🎯 **CLI Interface**: Interactive terminal-based chat with real-time tool execution indicators.
+- 🔗 **Zero-Configuration Colab MCP Handshake**: Automatically manages the `colab-mcp` stdio subprocess and JSON-RPC lifecycle.
+- 👤 **Cross-Platform Chrome Profile Detection**: Detects all signed-in Google/Gmail accounts across Linux native, WSL, Windows, and macOS, opening pairing in the exact profile chosen.
+- 🚀 **Remote GPU Execution**: Programmatically injects, executes, polls, and deletes code cells on Google Colab with structured output and traceback handling.
+- 🔌 **Pre-Built Web Framework Adapters**:
+  - **FastAPI**: One-line `include_router(get_colab_router())` providing ready-to-use `/colab/status`, `/colab/accounts`, `/colab/connect`, `/colab/execute` endpoints.
+  - **Flask**: One-line `register_blueprint(get_colab_blueprint())` supporting synchronous multi-threaded Flask servers.
+- 🖥️ **Built-in CLI**: Interactive terminal utility with live account discovery, status dashboards, and code execution.
+- 🪶 **Ultra-Lightweight**: Zero local PyTorch, CUDA, or transformers dependencies. Local package size is under 1MB.
 
 ---
 
 ## 📦 Installation
 
-### From PyPI
 ```bash
 pip install vspagent
 ```
 
-### From Source
+For web framework support:
 ```bash
-# Clone the repository
-git clone https://github.com/vishnusureshperumbavoor/vsp_bot.git
-cd vsp_bot
+# With FastAPI support
+pip install "vspagent[fastapi]"
 
-# Create and activate virtual environment
-python -m venv venv
-.\venv\Scripts\Activate.ps1  # Windows
+# With Flask support
+pip install "vspagent[flask]"
 
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### ⚙️ Environment Setup
-Create a `.env` file in the root directory:
-```env
-OPENAI_API_KEY=your_openai_key
-TELEGRAM_BOT_TOKEN=your_bot_token
-ADZUNA_APP_ID=your_adzuna_id
-ADZUNA_API_KEY=your_adzuna_key
+# With all integrations
+pip install "vspagent[all]"
 ```
 
 ---
 
-## 📱 Telegram Bot Mode
+## 🛠️ Quickstart
 
-The VSP Digital Twin can run as a Telegram bot to help you plan your weekends!
-
-**To start the bot:**
-```bash
-python -m vspagent.bot
-```
-
-**Commands:**
-- `/start`: Introduction to the VSP Saturday Event Planner.
-- `/events`: Fetches upcoming Saturday events in Bangalore.
-- `/jobs <keyword>`: Searches for job opportunities in Bangalore.
-- `[Text]`: Any other message will trigger a chat session with the VSP Digital Twin.
-
----
-
-## 🎯 Quick Start (CLI)
-
-Launch an interactive session with the digital twin:
-
-```bash
-vspagent-py
-```
-
-**Example Session:**
-```
-💬 You: Any tech events this Saturday?
-🔍 Searching Meetup.com for events in Bangalore...
-🤖 VSP Agent: I found 5 events for this Saturday! There's a "GenAI Workshop" at Indiranagar 
-and a "React Meetup" in Koramangala. Which one sounds like your vibe?
-
-💬 You: What's your GitHub status?
-🤖 VSP Agent: I'm currently sitting at 124 followers and 42 public repos. 
-Feel free to check out my latest projects!
-```
-
----
-
-## 📚 API Reference
-
-### `VSPAgent` Class
+### 1. Python SDK
 
 ```python
-from vspagent import VSPAgent
+import asyncio
+from vspagent import ColabClient
 
-agent = VSPAgent()
-# No need to call init_ai() if only using OpenAI-based chat
-response = agent.chat("What are you working on lately?")
-print(response)
+async def main():
+    colab = ColabClient()
+    
+    # Connect with preferred Chrome profile (or Default)
+    print("Connecting to Google Colab...")
+    await colab.connect_browser(profile_directory="Default")
+    
+    # Wait until user approves pairing in Chrome tab
+    await colab.ensure_connected(timeout=60.0)
+    print(f"Connected! GPU: {colab.gpu_info}")
+    
+    # Execute code on remote cloud GPU
+    code = """
+import torch
+print("Hello from Colab GPU:", torch.cuda.get_device_name(0))
+    """
+    res = await colab.execute_code(code, keep_cell=False)
+    print("Output:\n", res["output"])
+
+asyncio.run(main())
 ```
 
-### `tools` Module
+---
 
-- `MeetupTool.fetch_bangalore_events()`: Returns Saturday events list.
-- `JobSearchTool.search_jobs(query)`: Returns job listings.
-- `SocialStatsTool.get_github_stats()`: Returns live follower counts.
+### 2. FastAPI Web Integration (e.g. Vibe-ML-Studio, Vibe-MI-Stdio)
+
+Mount the pre-built router directly onto your FastAPI application:
+
+```python
+from fastapi import FastAPI
+from vspagent.colab.integrations import get_colab_router
+
+app = FastAPI(title="My GPU-Accelerated Service")
+
+# Mounts /colab/status, /colab/accounts, /colab/connect, /colab/execute
+app.include_router(get_colab_router(), prefix="/api")
+```
 
 ---
 
-## 👨‍💻 About VSP
+### 3. Flask Web Integration (e.g. Karaoke Extractor)
 
-**Vishnu Suresh Perumbavoor** is a Software Engineer, Singer, and YouTuber. He is the founder of **VSP Enterprises** and **VSP Intelligence**.
+```python
+from flask import Flask
+from vspagent.colab.integrations import get_colab_blueprint
 
-### 🏆 Accomplishments
-- Won 3rd prize in Vaiga Agrihack 2023
-- Participated in Rajasthan IT Hackathon 2023
-- Won 1st prize in startup idea presentation at Palakkad
+app = Flask(__name__)
 
-### 🔧 Tech Stack
-React, Node.js, FastAPI, Docker, OHIF, Cornerstone3D, VTKjs, DICOM
+# Mounts /colab/status, /colab/accounts, /colab/connect, /colab/execute
+app.register_blueprint(get_colab_blueprint(), url_prefix="/api/colab")
+```
 
 ---
 
-## 🔗 Connect
+### 4. Interactive Terminal CLI
 
-- 💼 [LinkedIn](https://www.linkedin.com/in/vishnu-suresh-perumbavoor/)
-- 🐙 [GitHub](https://github.com/vishnusureshperumbavoor)
-- 🐦 [Twitter](https://twitter.com/vspeeeeee)
-- 📺 [YouTube](https://www.youtube.com/@vishnusureshperumbavoor/videos)
-- 📷 [Instagram](https://www.instagram.com/vishnusureshperumbavoor/)
+```bash
+# 1. Discover available Google / Chrome accounts
+vspagent colab accounts
+
+# 2. Check connection status and GPU hardware
+vspagent colab status
+
+# 3. Interactively connect to Colab tab
+vspagent colab connect
+
+# 4. Execute Python code directly on remote Colab GPU
+vspagent colab exec -c "import torch; print(torch.cuda.is_available())"
+
+# Or run a complete Python script file
+vspagent colab exec -f ./train_decision_model.py
+```
 
 ---
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
-
----
-
-Current version: **2.2.0** | Made with ❤️ by Vishnu Suresh Perumbavoor
+MIT License © [Vishnu Suresh Perumbavoor](https://github.com/vishnusureshperumbavoor)
