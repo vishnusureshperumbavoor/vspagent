@@ -427,7 +427,12 @@ class ColabMCPClient:
         await self.ensure_connected()
 
         # Step 1: Add code cell
-        add_res = await self.call_tool("add_code_cell", {"code": code})
+        add_args = {
+            "cellIndex": 0,
+            "language": "python",
+            "code": code,
+        }
+        add_res = await self.call_tool("add_code_cell", add_args)
         cell_id = extract_cell_id(add_res)
 
         if not cell_id:
