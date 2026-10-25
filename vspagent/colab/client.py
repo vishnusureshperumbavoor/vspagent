@@ -292,19 +292,26 @@ class ColabMCPClient:
         self.log(f"Active tools ({len(self.tools)}): {', '.join(self.tools.keys())}")
 
         if "add_code_cell" in self.tools and "run_code_cell" in self.tools:
-            was_connected = self.status == "connected"
             self.status = "connected"
-            self.status_message = "Connected to Google Colab GPU session!"
+            if not self.gpu_info:
+                self.status_message = "Connected to Colab tab. Ready (Select A100 in Colab: Runtime -> Change runtime type)."
             if self._connected_event:
                 self._connected_event.set()
-            if not was_connected and not self.gpu_info:
-                asyncio.create_task(self._probe_gpu_info())
         elif self.status != "pairing":
             self.status = "not_connected"
             self.status_message = "Server started. Ready to pair with Colab."
 
-    async def _probe_gpu_info(self):
-        """Probes GPU hardware details on the connected runtime."""
+    async def probe_gpu_info(self, force: bool = False) -> Optional[str]:
+        """Probes GPU hardware details on the connected runtime on demand.
+        
+        Does not execute automatically on initial tab pairing to avoid forcing Colab
+        into a CPU runtime before the user can select an NVIDIA A100 GPU.
+        """
+        if not self.is_connected:
+            return None
+        if self.gpu_info and not force:
+            return self.gpu_info
+
         try:
             probe_code = (
                 "import torch\n"
@@ -314,15 +321,19 @@ class ColabMCPClient:
                 "else:\n"
                 "    print('GPU_INFO:CPU Runtime (Enable GPU in Colab: Runtime -> Change runtime type)')"
             )
-            res = await self.execute_code(probe_code, keep_cell=False)
+            res = await self.execute_code(probe_code, keep_cell=False, timeout=20.0)
             for line in res.get("output", "").splitlines():
                 if line.startswith("GPU_INFO:"):
                     self.gpu_info = line.split("GPU_INFO:", 1)[1].strip()
                     self.status_message = f"Connected: {self.gpu_info}"
                     self.log(f"Detected Colab runtime: {self.gpu_info}")
-                    break
+                    return self.gpu_info
         except Exception as e:
             self.log(f"GPU probe warning: {e}")
+        return self.gpu_info
+
+    # Backwards compatibility alias
+    _probe_gpu_info = probe_gpu_info
 
     async def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         """Invokes an MCP tool by name."""

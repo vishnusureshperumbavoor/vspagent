@@ -67,6 +67,25 @@ def get_colab_router() -> Any:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.post("/probe-gpu")
+    async def probe_gpu(force: bool = True):
+        """On-demand probe of remote Colab hardware (e.g. after user changes to A100 GPU)."""
+        if internal_colab_client.status != "connected":
+            raise HTTPException(
+                status_code=400,
+                detail="Colab runtime is not connected. Call POST /connect first.",
+            )
+        try:
+            gpu = await internal_colab_client.probe_gpu_info(force=force)
+            return {
+                "status": internal_colab_client.status,
+                "gpu_info": gpu,
+                "message": internal_colab_client.status_message,
+                "connected": internal_colab_client.status == "connected",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     @router.post("/execute")
     async def execute(req: ExecuteRequest):
         if internal_colab_client.status != "connected":
