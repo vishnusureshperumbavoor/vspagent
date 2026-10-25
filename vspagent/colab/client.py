@@ -316,12 +316,19 @@ class ColabMCPClient:
             probe_code = (
                 "import torch\n"
                 "if torch.cuda.is_available():\n"
-                "    props = torch.cuda.get_device_properties(0)\n"
-                "    print(f'GPU_INFO:{torch.cuda.get_device_name(0)} ({props.total_memory / (1024**3):.1f} GB VRAM)')\n"
+                "    device = torch.cuda.get_device_name(0)\n"
+                "    vram = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)\n"
+                "    print(f'=== HARDWARE PROBE ===')\n"
+                "    print(f'GPU: {device}')\n"
+                "    print(f'VRAM: {vram} GB')\n"
+                "    print(f'Status: Ready for Model Inference')\n"
+                "    print(f'GPU_INFO:{device} ({vram} GB VRAM)')\n"
                 "else:\n"
+                "    print('=== HARDWARE PROBE ===')\n"
+                "    print('Status: Running on CPU (Go to Runtime -> Change runtime type -> Select GPU)')\n"
                 "    print('GPU_INFO:CPU Runtime (Enable GPU in Colab: Runtime -> Change runtime type)')"
             )
-            res = await self.execute_code(probe_code, keep_cell=False, timeout=20.0)
+            res = await self.execute_code(probe_code, keep_cell=True, timeout=20.0)
             for line in res.get("output", "").splitlines():
                 if line.startswith("GPU_INFO:"):
                     self.gpu_info = line.split("GPU_INFO:", 1)[1].strip()
