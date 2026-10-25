@@ -81,6 +81,7 @@ def get_colab_router() -> Any:
                 "status": internal_colab_client.status,
                 "gpu_info": gpu,
                 "message": internal_colab_client.status_message,
+                "verified_at": internal_colab_client.last_probe_time,
                 "connected": internal_colab_client.status == "connected",
             }
         except Exception as e:

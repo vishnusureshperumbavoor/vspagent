@@ -82,6 +82,7 @@ class ColabMCPClient:
         self.status = "not_connected"  # not_connected, pairing, connected, disconnected, error
         self.status_message = "Ready to pair with Colab."
         self.gpu_info: Optional[str] = None
+        self.last_probe_time: Optional[str] = None
         self.selected_profile: Optional[str] = "Default"
         self.profile_dir: Optional[str] = "Default"
         self.authuser: Optional[int] = 0
@@ -314,26 +315,37 @@ class ColabMCPClient:
 
         try:
             probe_code = (
-                "import torch\n"
+                "import datetime, torch\n"
+                "now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')\n"
                 "if torch.cuda.is_available():\n"
                 "    device = torch.cuda.get_device_name(0)\n"
                 "    vram = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)\n"
-                "    print(f'=== HARDWARE PROBE ===')\n"
+                "    print(f'=== HARDWARE PROBE [{now_str}] ===')\n"
+                "    print(f'Time: {now_str}')\n"
                 "    print(f'GPU: {device}')\n"
                 "    print(f'VRAM: {vram} GB')\n"
                 "    print(f'Status: Ready for Model Inference')\n"
                 "    print(f'GPU_INFO:{device} ({vram} GB VRAM)')\n"
+                "    print(f'PROBE_TIME:{now_str}')\n"
                 "else:\n"
-                "    print('=== HARDWARE PROBE ===')\n"
+                "    print(f'=== HARDWARE PROBE [{now_str}] ===')\n"
+                "    print(f'Time: {now_str}')\n"
                 "    print('Status: Running on CPU (Go to Runtime -> Change runtime type -> Select GPU)')\n"
-                "    print('GPU_INFO:CPU Runtime (Enable GPU in Colab: Runtime -> Change runtime type)')"
+                "    print('GPU_INFO:CPU Runtime (Enable GPU in Colab: Runtime -> Change runtime type)')\n"
+                "    print(f'PROBE_TIME:{now_str}')"
             )
             res = await self.execute_code(probe_code, keep_cell=True, timeout=20.0)
+            from datetime import datetime
+            probe_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             for line in res.get("output", "").splitlines():
+                if line.startswith("PROBE_TIME:"):
+                    probe_time = line.split("PROBE_TIME:", 1)[1].strip()
                 if line.startswith("GPU_INFO:"):
                     self.gpu_info = line.split("GPU_INFO:", 1)[1].strip()
-                    self.status_message = f"Connected: {self.gpu_info}"
-                    self.log(f"Detected Colab runtime: {self.gpu_info}")
+                    self.last_probe_time = probe_time
+                    self.status_message = f"Connected: {self.gpu_info} (Verified: {probe_time})"
+                    self.log(f"[{probe_time}] Detected Colab runtime: {self.gpu_info}")
+                    print(f"[{probe_time}] Colab GPU verified: {self.gpu_info}")
                     return self.gpu_info
         except Exception as e:
             self.log(f"GPU probe warning: {e}")
@@ -577,6 +589,10 @@ class ColabMCPClient:
         self.status = "disconnected"
         self.status_message = "Disconnected"
         self.gpu_info = None
+        self.last_probe_time = None
+        self.tools.clear()
+        if self._connected_event:
+            self._connected_event.clear()
         for task in self._reader_tasks:
             task.cancel()
         self._reader_tasks.clear()
