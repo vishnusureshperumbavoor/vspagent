@@ -5,9 +5,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="vspagent",
-    version="3.1.0",
+    version="3.2.0",
     author="Vishnu Suresh Perumbavoor",
-    description="Universal Google Colab MCP Agent Harness & Cloud GPU SDK.",
+    description="Universal Google Colab MCP & JarvisLabs Cloud GPU Agent Harness.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/vishnusureshperumbavoor/vspagent",

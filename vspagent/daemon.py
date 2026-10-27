@@ -20,6 +20,12 @@ from typing import Any, Dict, Optional
 from vspagent import __version__
 from vspagent.colab.client import internal_colab_client
 from vspagent.colab.profiles import list_chrome_accounts
+from vspagent.jarvis import (
+    JarvisLabsClient,
+    list_active_tunnels,
+    start_ssh_tunnel,
+    stop_ssh_tunnel,
+)
 
 DAEMON_DIR = Path.home() / ".vspagent"
 DAEMON_STATE_FILE = DAEMON_DIR / "daemon.json"
@@ -117,6 +123,20 @@ class VspAgentDaemonHandler(BaseHTTPRequestHandler):
                     "daemon_pid": os.getpid(),
                 },
             )
+            return
+
+        if path == "/jarvis/instances":
+            client = JarvisLabsClient()
+            self._send_json(200, {"ok": True, "instances": client.list_instances()})
+            return
+
+        if path == "/jarvis/status":
+            client = JarvisLabsClient()
+            self._send_json(200, {"ok": True, "instance": client.get_active_instance()})
+            return
+
+        if path == "/jarvis/tunnels":
+            self._send_json(200, {"ok": True, "tunnels": list_active_tunnels()})
             return
 
         self._send_json(404, {"error": f"Endpoint not found: {self.path}"})
@@ -219,6 +239,94 @@ class VspAgentDaemonHandler(BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "disconnected", "message": "Colab session disconnected"})
             except Exception as e:
                 self._send_json(500, {"status": "error", "message": str(e)})
+            return
+
+        if path == "/jarvis/adopt":
+            host = data.get("host")
+            if not host:
+                self._send_json(400, {"ok": False, "error": "Missing 'host' field"})
+                return
+            client = JarvisLabsClient()
+            info = client.register_instance(
+                host=host,
+                machine_id=data.get("id"),
+                name=data.get("name", "adopted-gpu"),
+                gpu_type=data.get("gpu", "A30"),
+                port=int(data.get("port", 22)),
+                set_active=True,
+            )
+            self._send_json(200, {"ok": True, "instance": info})
+            return
+
+        if path == "/jarvis/pause":
+            client = JarvisLabsClient()
+            try:
+                ok = client.pause(data.get("id"))
+                self._send_json(200, {"ok": ok, "message": "Instance paused"})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/jarvis/resume":
+            client = JarvisLabsClient()
+            try:
+                ok = client.resume(data.get("id"), gpu_type=data.get("gpu"))
+                self._send_json(200, {"ok": ok, "message": "Instance resumed"})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/jarvis/destroy":
+            client = JarvisLabsClient()
+            try:
+                ok = client.destroy(data.get("id"))
+                self._send_json(200, {"ok": ok, "message": "Instance destroyed"})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/jarvis/exec":
+            cmd = data.get("command")
+            if not cmd:
+                self._send_json(400, {"ok": False, "error": "Missing 'command' field"})
+                return
+            client = JarvisLabsClient()
+            try:
+                code, output = client.exec(
+                    command=cmd,
+                    instance_id=data.get("id"),
+                    workdir=data.get("workdir", "/home"),
+                    stream=False,
+                )
+                self._send_json(200, {"ok": code == 0, "exit_code": code, "output": output})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/jarvis/tunnel":
+            remote_port = data.get("remote_port")
+            if not remote_port:
+                self._send_json(400, {"ok": False, "error": "Missing 'remote_port' field"})
+                return
+            client = JarvisLabsClient()
+            try:
+                t_info = client.tunnel(
+                    remote_port=int(remote_port),
+                    local_port=int(data.get("local_port")) if data.get("local_port") else None,
+                    instance_id=data.get("id"),
+                )
+                self._send_json(200, {"ok": True, "tunnel": t_info})
+            except Exception as e:
+                self._send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/jarvis/untunnel":
+            local_port = data.get("local_port")
+            if not local_port:
+                self._send_json(400, {"ok": False, "error": "Missing 'local_port' field"})
+                return
+            ok = stop_ssh_tunnel(int(local_port))
+            self._send_json(200, {"ok": ok, "message": f"Tunnel on port {local_port} stopped"})
             return
 
         self._send_json(404, {"error": f"Endpoint not found: {self.path}"})
