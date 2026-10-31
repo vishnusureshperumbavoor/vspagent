@@ -162,7 +162,13 @@ class JarvisLabsClient:
         return info
 
     def get_active_instance(self) -> Optional[Dict]:
-        """Retrieve the primary/active instance configuration."""
+        """Retrieve the primary/active instance configuration, pruning any cached instance
+        that has been deleted on JarvisLabs."""
+        remote = self.list_instances()
+        for inst in remote:
+            if str(inst.get("status", "")).lower() == "running" and inst.get("host"):
+                return inst
+
         saved = self._load_saved_instances()
         active_id = saved.get("active_id")
         if active_id and active_id in saved and isinstance(saved[active_id], dict):
@@ -184,14 +190,16 @@ class JarvisLabsClient:
         return False
 
     def list_instances(self) -> List[Dict]:
-        """List all instances from the official SDK (if available) and locally tracked state."""
+        """List all instances from the official SDK or JarvisLabs REST API and prune stale local entries."""
         results = []
         seen_ids = set()
+        remote_verified = False
 
         # 1. Query official SDK if installed and configured
         if self._sdk_client:
             try:
                 remote_list = self._sdk_client.instances.list()
+                remote_verified = True
                 for inst in remote_list:
                     mid = str(getattr(inst, "machine_id", getattr(inst, "id", "")))
                     host = getattr(inst, "ip", getattr(inst, "host", ""))
@@ -221,14 +229,57 @@ class JarvisLabsClient:
                     seen_ids.add(mid)
             except Exception:
                 pass
+        elif self.token:
+            try:
+                import requests
 
-        # 2. Add locally registered instances
+                resp = requests.get(
+                    "https://backendn.jarvislabs.net/users/fetch",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=15,
+                )
+                if resp.ok:
+                    remote_verified = True
+                    for raw in resp.json().get("instances", []) or []:
+                        if isinstance(raw, dict):
+                            mid = str(raw.get("machine_id") or raw.get("id") or "")
+                            host = str(raw.get("public_ip") or raw.get("ip") or raw.get("host") or "")
+                            ssh_cmd = str(raw.get("ssh_str") or raw.get("ssh_command") or "")
+                            item = {
+                                "machine_id": mid,
+                                "name": raw.get("instance_name") or raw.get("name") or "remote-gpu",
+                                "host": host,
+                                "user": "root",
+                                "port": 22,
+                                "gpu_type": raw.get("gpu_type") or "GPU",
+                                "status": raw.get("status") or "Unknown",
+                                "jupyter_url": raw.get("url") or raw.get("jupyter_url"),
+                                "ssh_command": ssh_cmd or (f"ssh root@{host}" if host else ""),
+                            }
+                            results.append(item)
+                            seen_ids.add(mid)
+            except Exception:
+                pass
+
+        # 2. Reconcile locally registered instances (auto-prune deleted JarvisLabs machine_ids)
         saved = self._load_saved_instances()
-        for k, v in saved.items():
-            if k == "active_id" or not isinstance(v, dict):
+        dirty = False
+        for k in list(saved.keys()):
+            if k == "active_id":
+                continue
+            v = saved.get(k)
+            if not isinstance(v, dict):
                 continue
             if k not in seen_ids:
-                results.append(v)
+                if remote_verified and not str(k).startswith("inst-"):
+                    saved.pop(k, None)
+                    if saved.get("active_id") == k:
+                        saved.pop("active_id", None)
+                    dirty = True
+                else:
+                    results.append(v)
+        if dirty:
+            self._save_saved_instances(saved)
 
         return results
 
