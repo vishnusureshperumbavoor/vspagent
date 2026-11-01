@@ -148,7 +148,49 @@ vspagent jarvis pause
 
 ---
 
-### 5. Google Colab MCP CLI & Daemon
+### 5. Dataset Preprocessing & Sanitization (`vspagent dataset`)
+
+Quickly convert raw messaging exports (e.g. WhatsApp) into clean, multi-turn ChatML JSONL datasets with automated PII masking:
+
+```bash
+# Parse WhatsApp text export into ChatML dialogues (masks phone numbers and emails automatically)
+vspagent dataset parse-whatsapp \
+    -i ./assets/whatsapp_chats/ \
+    -a "Vishnu Suresh Perumbavoor" \
+    -o ./train_persona.jsonl
+```
+
+---
+
+### 6. Automated Model Fine-Tuning, Quantization & HF Publishing (`vspagent train`)
+
+Fine-tune LLMs natively without system prompts, merge LoRA adapters, convert to quantized GGUF (`q4_k_m`), and publish directly to Hugging Face Hub in a single command:
+
+```bash
+# Fine-tune on JarvisLabs Cloud GPU (NVIDIA A30), quantize to GGUF, push to Hub, and auto-pause
+vspagent train \
+    --backend jarvis \
+    --gpu A30 \
+    --dataset ./train_persona.jsonl \
+    --base-model Qwen/Qwen2.5-0.5B-Instruct \
+    --epochs 3 \
+    --batch-size 4 \
+    --grad-accum 2 \
+    --lr 2e-4 \
+    --quantize q4_k_m \
+    --push-to-hf vishnusureshperumbavoor/vsp-persona-qwen-0.5b \
+    --auto-pause
+
+# Or run locally on CPU/CUDA
+vspagent train \
+    --backend local \
+    --dataset ./train_persona.jsonl \
+    --epochs 3
+```
+
+---
+
+### 7. Google Colab MCP CLI & Daemon
 
 ```bash
 # Discover available Google / Chrome profiles

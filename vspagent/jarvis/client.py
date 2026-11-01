@@ -85,7 +85,7 @@ def _find_env_token() -> Optional[str]:
 def _find_default_ssh_key() -> Optional[str]:
     """Auto-detect available local SSH private key."""
     home_ssh = Path.home() / ".ssh"
-    for candidate in ("id_ed25519", "id_rsa", "id_ecdsa"):
+    for candidate in ("id_ed25519_jarvis", "id_ed25519", "id_rsa", "id_ecdsa"):
         key_path = home_ssh / candidate
         if key_path.exists():
             return str(key_path)
@@ -135,6 +135,7 @@ class JarvisLabsClient:
         gpu_type: str = "Unknown",
         status: str = "Running",
         jupyter_url: Optional[str] = None,
+        password: str = "",
         set_active: bool = True,
     ) -> Dict:
         """Register or adopt an existing running JarvisLabs instance by IP/Host."""
@@ -150,6 +151,7 @@ class JarvisLabsClient:
             "gpu_type": gpu_type,
             "status": status,
             "jupyter_url": jupyter_url,
+            "password": password,
             "registered_at": time.time(),
             "ssh_command": f"ssh -o StrictHostKeyChecking=no {user}@{host}" + (f" -p {port}" if port != 22 else ""),
         }
@@ -223,6 +225,7 @@ class JarvisLabsClient:
                         "gpu_type": getattr(inst, "gpu_type", getattr(inst, "gpu", "GPU")),
                         "status": getattr(inst, "status", "Unknown"),
                         "jupyter_url": getattr(inst, "url", getattr(inst, "jupyter_url", None)),
+                        "password": getattr(inst, "password", ""),
                         "ssh_command": ssh_cmd or f"ssh {user}@{host}",
                     }
                     results.append(item)
@@ -300,7 +303,7 @@ class JarvisLabsClient:
         inst = self._sdk_client.instances.create(
             gpu_type=gpu_type,
             name=name,
-            hdd=hdd,
+            storage=hdd,
             template=template,
         )
         mid = str(getattr(inst, "machine_id", getattr(inst, "id", "")))
@@ -325,6 +328,7 @@ class JarvisLabsClient:
             gpu_type=gpu_type,
             status="Running",
             jupyter_url=getattr(inst, "url", None),
+            password=getattr(inst, "password", ""),
         )
 
     def pause(self, machine_id: Optional[str] = None) -> bool:
@@ -423,6 +427,122 @@ class JarvisLabsClient:
             raise ValueError("Instance has no valid host/IP address.")
         return host, user, port
 
+    def exec_jupyter(
+        self,
+        command: str,
+        instance_id: Optional[str] = None,
+        stream: bool = True,
+    ) -> Tuple[int, str]:
+        """Execute a bash command on the GPU instance via the Jupyter HTTPS/WebSocket interface (Port 443)."""
+        import requests
+        import uuid
+        import websocket
+
+        inst = self.get_active_instance() if not instance_id else self._load_saved_instances().get(str(instance_id))
+        if not inst:
+            raise ValueError("No active or specified instance found.")
+
+        jupyter_url = inst.get("jupyter_url", "")
+        password = inst.get("password", "")
+        if not jupyter_url or not password:
+            raise ValueError("Jupyter URL or password not available for this instance.")
+
+        base_url = jupyter_url.rstrip("/").replace("/lab", "")
+        session = requests.Session()
+        session.get(f"{base_url}/login")
+        xsrf = session.cookies.get("_xsrf", "")
+        session.post(f"{base_url}/login", data={"password": password, "_xsrf": xsrf}, headers={"Referer": f"{base_url}/login"})
+        xsrf = session.cookies.get("_xsrf", "")
+
+        headers = {"X-XSRFToken": xsrf, "Content-Type": "application/json"}
+        r = session.post(f"{base_url}/api/kernels", headers=headers, json={"name": "python3"})
+        if r.status_code not in (200, 201):
+            raise RuntimeError(f"Failed to start Jupyter kernel: {r.text}")
+        kernel_id = r.json()["id"]
+
+        cookie_str = "; ".join([f"{c.name}={c.value}" for c in session.cookies])
+        ws_protocol = "wss" if base_url.startswith("https") else "ws"
+        host_domain = base_url.split("://")[-1]
+        ws_url = f"{ws_protocol}://{host_domain}/api/kernels/{kernel_id}/channels"
+        ws = websocket.create_connection(ws_url, header={"Cookie": cookie_str})
+
+        code = f"!{command}"
+        msg_id = str(uuid.uuid4())
+        execute_msg = {
+            "header": {"msg_id": msg_id, "username": "vsp", "session": str(uuid.uuid4()), "msg_type": "execute_request", "version": "5.3"},
+            "parent_header": {}, "metadata": {},
+            "content": {"code": code, "silent": False, "store_history": True, "user_expressions": {}, "allow_stdin": False},
+            "channel": "shell"
+        }
+        ws.send(json.dumps(execute_msg))
+        out_chunks = []
+        exit_code = 0
+
+        try:
+            while True:
+                data = json.loads(ws.recv())
+                msg_type = data.get("msg_type")
+                content = data.get("content", {})
+                if msg_type == "stream":
+                    text = content.get("text", "")
+                    if stream:
+                        sys.stdout.write(text)
+                        sys.stdout.flush()
+                    out_chunks.append(text)
+                elif msg_type == "error":
+                    exit_code = 1
+                    err_text = "\n".join(content.get("traceback", []))
+                    if stream:
+                        sys.stderr.write(err_text + "\n")
+                    out_chunks.append(err_text)
+                elif msg_type == "execute_reply":
+                    status = content.get("status")
+                    if status != "ok":
+                        exit_code = 1
+                    break
+        finally:
+            ws.close()
+            session.delete(f"{base_url}/api/kernels/{kernel_id}", headers=headers)
+
+        return exit_code, "".join(out_chunks)
+
+    def upload_jupyter(
+        self,
+        local_path: str,
+        remote_filename: Optional[str] = None,
+        instance_id: Optional[str] = None,
+    ) -> bool:
+        """Upload a file to the GPU instance root directory via Jupyter REST API (Port 443)."""
+        import requests
+        inst = self.get_active_instance() if not instance_id else self._load_saved_instances().get(str(instance_id))
+        if not inst:
+            raise ValueError("No active or specified instance found.")
+
+        jupyter_url = inst.get("jupyter_url", "")
+        password = inst.get("password", "")
+        if not jupyter_url or not password:
+            raise ValueError("Jupyter URL or password not available.")
+
+        base_url = jupyter_url.rstrip("/").replace("/lab", "")
+        session = requests.Session()
+        session.get(f"{base_url}/login")
+        xsrf = session.cookies.get("_xsrf", "")
+        session.post(f"{base_url}/login", data={"password": password, "_xsrf": xsrf}, headers={"Referer": f"{base_url}/login"})
+        xsrf = session.cookies.get("_xsrf", "")
+
+        path = Path(local_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"File not found: {local_path}")
+
+        target_name = remote_filename or path.name
+        content = path.read_text(encoding="utf-8", errors="replace")
+        resp = session.put(
+            f"{base_url}/api/contents/{target_name}",
+            json={"content": content, "format": "text", "type": "file"},
+            headers={"X-XSRFToken": xsrf}
+        )
+        return resp.status_code in (200, 201)
+
     def exec(
         self,
         command: str,
@@ -430,8 +550,15 @@ class JarvisLabsClient:
         workdir: str = "/home",
         stream: bool = True,
         env_vars: Optional[Dict[str, str]] = None,
+        prefer_jupyter: bool = False,
     ) -> Tuple[int, str]:
-        """Execute a remote bash command over SSH on the GPU instance."""
+        """Execute a remote bash command over SSH on the GPU instance with automatic Jupyter HTTPS fallback."""
+        inst = self.get_active_instance() if not instance_id else self._load_saved_instances().get(str(instance_id))
+        has_jupyter = inst and inst.get("jupyter_url") and inst.get("password")
+
+        if prefer_jupyter and has_jupyter:
+            return self.exec_jupyter(command, instance_id=instance_id, stream=stream)
+
         host, user, port = self._resolve_connection_details(instance_id)
 
         env_prefix = ""
@@ -446,6 +573,7 @@ class JarvisLabsClient:
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "LogLevel=ERROR",
+            "-o", "ConnectTimeout=5",
             "-o", "ServerAliveInterval=30",
         ]
         if self.ssh_key:
@@ -455,25 +583,37 @@ class JarvisLabsClient:
 
         ssh_cmd.extend([f"{user}@{host}", full_remote_cmd])
 
-        if stream:
-            proc = subprocess.Popen(
-                ssh_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            output_lines = []
-            if proc.stdout:
-                for line in iter(proc.stdout.readline, ""):
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    output_lines.append(line)
-            proc.wait()
-            return proc.returncode, "".join(output_lines)
-        else:
-            res = subprocess.run(ssh_cmd, capture_output=True, text=True)
-            return res.returncode, res.stdout + res.stderr
+        try:
+            if stream:
+                proc = subprocess.Popen(
+                    ssh_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                output_lines = []
+                if proc.stdout:
+                    for line in iter(proc.stdout.readline, ""):
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+                        output_lines.append(line)
+                proc.wait()
+                if proc.returncode == 255 and has_jupyter:
+                    print("\n[vspagent] SSH connection failed/timed out. Switching to Jupyter HTTPS execution...")
+                    return self.exec_jupyter(command, instance_id=instance_id, stream=stream)
+                return proc.returncode, "".join(output_lines)
+            else:
+                res = subprocess.run(ssh_cmd, capture_output=True, text=True)
+                if res.returncode == 255 and has_jupyter:
+                    print("[vspagent] SSH connection failed/timed out. Switching to Jupyter HTTPS execution...")
+                    return self.exec_jupyter(command, instance_id=instance_id, stream=stream)
+                return res.returncode, res.stdout + res.stderr
+        except Exception as e:
+            if has_jupyter:
+                print(f"[vspagent] SSH error ({e}). Switching to Jupyter HTTPS execution...")
+                return self.exec_jupyter(command, instance_id=instance_id, stream=stream)
+            raise
 
     def run_script(
         self,
@@ -504,13 +644,22 @@ class JarvisLabsClient:
         remote_path: str = "/home",
         instance_id: Optional[str] = None,
     ) -> bool:
-        """Upload local file or directory to remote GPU instance via SCP."""
+        """Upload local file or directory to remote GPU instance via SCP (with Jupyter REST fallback)."""
+        inst = self.get_active_instance() if not instance_id else self._load_saved_instances().get(str(instance_id))
+        has_jupyter = inst and inst.get("jupyter_url") and inst.get("password")
+
         host, user, port = self._resolve_connection_details(instance_id)
         local_p = Path(local_path)
         if not local_p.exists():
             raise FileNotFoundError(f"Source path does not exist: {local_path}")
 
-        scp_cmd = ["scp", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR"]
+        scp_cmd = [
+            "scp",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
+            "-o", "ConnectTimeout=5",
+        ]
         if local_p.is_dir():
             scp_cmd.append("-r")
         if self.ssh_key:
@@ -520,6 +669,9 @@ class JarvisLabsClient:
 
         scp_cmd.extend([str(local_p), f"{user}@{host}:{remote_path}"])
         res = subprocess.run(scp_cmd)
+        if res.returncode != 0 and has_jupyter and local_p.is_file():
+            print(f"[vspagent] SCP failed (code {res.returncode}). Falling back to Jupyter REST upload...")
+            return self.upload_jupyter(local_path, instance_id=instance_id)
         return res.returncode == 0
 
     def sync_down(
