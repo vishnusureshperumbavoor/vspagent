@@ -160,6 +160,14 @@ vspagent dataset parse-whatsapp \
     -o ./train_persona.jsonl
 ```
 
+Deduplicate and sanitize an existing dataset before training (drops repeated FAQ blocks, code dumps, oversized URLs, and short filler turns):
+
+```bash
+vspagent dataset clean \
+    -i ./train_persona.jsonl \
+    -o ./train_persona_clean.jsonl
+```
+
 ---
 
 ### 6. Automated Model Fine-Tuning, Quantization & HF Publishing (`vspagent train`)

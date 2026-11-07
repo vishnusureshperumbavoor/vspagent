@@ -22,7 +22,7 @@ except ImportError:
 
 from vspagent import __version__
 from vspagent.colab.profiles import list_chrome_accounts
-from vspagent.dataset import parse_whatsapp_chats
+from vspagent.dataset import parse_whatsapp_chats, clean_jsonl
 from vspagent.trainer import train_persona
 from vspagent.jarvis import (
     JarvisLabsClient,
@@ -580,6 +580,47 @@ def cmd_dataset_parse_whatsapp(args):
     _print_success(f"Generated {len(dialogues)} multi-turn dialogue samples -> {args.output}")
 
 
+def cmd_dataset_clean(args):
+    """Clean, deduplicate and sanitize an existing ChatML JSONL dataset."""
+    _print_info(f"Cleaning dataset '{args.input}'...")
+    report = clean_jsonl(
+        input_path=args.input,
+        output_path=args.output,
+        max_chars=args.max_chars,
+        min_2turn_answer=args.min_2turn_answer,
+        max_url_len=args.max_url_len,
+        max_turns=args.max_turns,
+        drop_code=not args.keep_code,
+        drop_patterns=args.drop_regex,
+        dedupe_by=args.dedupe_by,
+        max_answer_variants=args.max_answer_variants,
+        mask_private_info=args.mask_pii,
+        shuffle=args.shuffle,
+        seed=args.seed,
+    )
+    if HAS_RICH:
+        table = Table(title="Dataset Cleaning Report", show_header=True)
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right", style="green")
+        order = [
+            "input_samples", "output_samples", "invalid", "too_many_turns",
+            "code", "too_long", "long_url", "blocked_pattern", "short_2turn",
+            "duplicate_exact", "duplicate_answer", "parse_errors",
+            "avg_turns_before", "avg_turns_after", "unique_assistant_messages",
+        ]
+        for key in order:
+            if key in report and report[key] is not None:
+                table.add_row(key, str(report[key]))
+        console.print(table)
+    else:
+        for key, value in report.items():
+            print(f"{key}: {value}")
+    if report.get("output_path"):
+        _print_success(f"Wrote {report['output_samples']} samples -> {report['output_path']}")
+    else:
+        _print_success(f"Kept {report['output_samples']} samples (dry run, no output written)")
+
+
 def cmd_train(args):
     """Run model fine-tuning locally or on JarvisLabs GPU."""
     if args.backend == "local":
@@ -787,6 +828,22 @@ def main():
     wa_p.add_argument("--no-mask-pii", action="store_true", help="Disable masking of phone numbers and emails")
     wa_p.add_argument("--max-turns", type=int, default=24, help="Maximum dialogue turns per sample (default: 24)")
 
+    # clean
+    clean_p = dataset_subs.add_parser("clean", help="Clean, dedupe and sanitize a ChatML JSONL dataset")
+    clean_p.add_argument("-i", "--input", required=True, help="Path to input ChatML .jsonl dataset")
+    clean_p.add_argument("-o", "--output", help="Output .jsonl path (omit for a dry-run report)")
+    clean_p.add_argument("--max-chars", type=int, default=700, help="Drop samples with any message longer than this (default: 700)")
+    clean_p.add_argument("--min-2turn-answer", type=int, default=8, help="Drop 2-turn samples whose assistant reply is shorter than this (default: 8)")
+    clean_p.add_argument("--max-url-len", type=int, default=100, help="Drop samples containing a URL longer than this (default: 100)")
+    clean_p.add_argument("--max-turns", type=int, default=8, help="Drop samples with more than this many turns (default: 8)")
+    clean_p.add_argument("--keep-code", action="store_true", help="Keep samples that contain code blocks/source code")
+    clean_p.add_argument("--dedupe-by", choices=["answer", "exact", "none"], default="answer", help="Deduplication strategy (default: answer)")
+    clean_p.add_argument("--max-answer-variants", type=int, default=3, help="Keep at most N distinct user prompts per identical answer (default: 3)")
+    clean_p.add_argument("--drop-regex", action="append", help="Additional regex; samples matching it are dropped (repeatable)")
+    clean_p.add_argument("--mask-pii", action="store_true", help="Mask phone numbers and emails in the output")
+    clean_p.add_argument("--shuffle", action="store_true", help="Shuffle the cleaned output")
+    clean_p.add_argument("--seed", type=int, default=42, help="Shuffle seed (default: 42)")
+
     # train command
     train_parser = subparsers.add_parser("train", help="End-to-end model fine-tuning, quantization & HF publisher")
     train_parser.add_argument("-d", "--dataset", required=True, help="Path to jsonl training dataset")
@@ -854,6 +911,8 @@ def main():
     elif args.subcommand == "dataset":
         if args.dataset_command == "parse-whatsapp":
             cmd_dataset_parse_whatsapp(args)
+        elif args.dataset_command == "clean":
+            cmd_dataset_clean(args)
         else:
             dataset_parser.print_help()
     elif args.subcommand == "train":

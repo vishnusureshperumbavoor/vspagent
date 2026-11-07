@@ -23,7 +23,7 @@ from vspagent.jarvis import (
     stop_ssh_tunnel,
     list_active_tunnels,
 )
-from vspagent.dataset import parse_whatsapp_chats, mask_pii
+from vspagent.dataset import parse_whatsapp_chats, mask_pii, clean_jsonl, clean_samples
 from vspagent.trainer import train_persona
 
 __all__ = [
@@ -45,6 +45,8 @@ __all__ = [
     "list_active_tunnels",
     "parse_whatsapp_chats",
     "mask_pii",
+    "clean_jsonl",
+    "clean_samples",
     "train_persona",
     "__version__",
 ]
