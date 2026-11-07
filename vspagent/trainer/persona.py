@@ -126,7 +126,10 @@ def train_persona(
     tokenized_dataset = raw_dataset.map(preprocess_conversation, remove_columns=raw_dataset.column_names)
 
     # 3. Model & LoRA
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    if torch.cuda.is_available():
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    else:
+        dtype = torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         dtype=dtype,
