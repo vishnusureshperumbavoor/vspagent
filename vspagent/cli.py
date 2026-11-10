@@ -460,6 +460,24 @@ def cmd_jarvis_doctor(args):
         detail += "  [editable checkout]"
     rows.append(("package", "ok", detail))
     rows.append(("interpreter", "ok", sys.executable))
+
+    # Distribution metadata vs module version. These drifted once (pyproject
+    # 3.1.0, module 3.3.0), which makes `pip show`/`uv tool list` lie about what
+    # is actually installed.
+    try:
+        from importlib.metadata import version as _dist_version
+
+        dist = _dist_version("vspagent")
+        if dist != info["version"]:
+            rows.append((
+                "dist metadata", "warn",
+                f"installed metadata says {dist} but module reports {info['version']} — reinstall the package",
+            ))
+        else:
+            rows.append(("dist metadata", "ok", f"vspagent {dist}"))
+    except Exception:
+        rows.append(("dist metadata", "warn", "package is not installed as a distribution (running from source)"))
+
     if info["dirty"]:
         rows.append((
             "install drift", "warn",
