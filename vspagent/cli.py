@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -393,6 +396,271 @@ def cmd_jarvis_status(args):
         print(f"  SSH: {active.get('ssh_command')}\n")
 
 
+def _install_info() -> dict:
+    """Describe where this vspagent build came from.
+
+    An editable checkout (``pip install -e ../vspagent``) means "whatever is on
+    disk right now", so the installed API can silently drift from the released
+    one. That is exactly how a run died with ``TypeError: unexpected keyword
+    argument 'password'`` after provisioning an expensive GPU.
+    """
+    info = {"path": "?", "version": "?", "git": None, "dirty": None, "editable": False}
+    try:
+        import vspagent as _pkg
+
+        root = Path(_pkg.__file__).resolve().parent.parent
+        info["path"] = str(root)
+        info["version"] = getattr(_pkg, "__version__", "?")
+        info["editable"] = "site-packages" not in str(root)
+        if (root / ".git").exists():
+            rev = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True,
+            )
+            if rev.returncode == 0:
+                info["git"] = rev.stdout.strip() or None
+            st = subprocess.run(
+                ["git", "-C", str(root), "status", "--porcelain"],
+                capture_output=True, text=True,
+            )
+            if st.returncode == 0:
+                info["dirty"] = bool(st.stdout.strip())
+    except Exception:
+        pass
+    return info
+
+
+def _print_checks(rows) -> int:
+    """Print (name, status, detail) rows and return a shell exit code."""
+    icons = {"ok": "[ok]", "warn": "[warn]", "fail": "[FAIL]"}
+    failed = 0
+    width = max((len(r[0]) for r in rows), default=0)
+    for name, status, detail in rows:
+        if status == "fail":
+            failed += 1
+        print(f"  {icons.get(status, '[?]'):<7} {name:<{width}}  {detail}")
+    return 1 if failed else 0
+
+
+def cmd_jarvis_doctor(args):
+    """Pre-flight health check: token, SDK, transport, install drift, live GPU."""
+    rows = []
+
+    try:
+        from vspagent.jarvis.client import CLIENT_API_VERSION, find_token
+    except Exception as exc:  # pragma: no cover
+        _print_error(f"vspagent.jarvis.client is not importable: {exc}")
+        return
+
+    info = _install_info()
+    detail = f"v{info['version']} (client API v{CLIENT_API_VERSION}) at {info['path']}"
+    if info["git"]:
+        detail += f" @ {info['git']}"
+    if info["editable"]:
+        detail += "  [editable checkout]"
+    rows.append(("package", "ok", detail))
+    rows.append(("interpreter", "ok", sys.executable))
+    if info["dirty"]:
+        rows.append((
+            "install drift", "warn",
+            "editable checkout has uncommitted changes; installed code != tagged release",
+        ))
+
+    try:
+        token, source = find_token()
+    except Exception as exc:
+        token, source = None, f"error: {exc}"
+    if token:
+        rows.append(("api token", "ok", f"found via {source} (len {len(token)})"))
+    else:
+        rows.append((
+            "api token", "fail",
+            "none found — run `jl setup`, or set JARVIS_LABS_API_TOKEN / write ~/.vspagent/jarvislabs.json",
+        ))
+
+    try:
+        import jarvislabs as _jl
+
+        rows.append(("jarvislabs SDK", "ok", getattr(_jl, "__version__", "installed")))
+    except Exception as exc:
+        rows.append((
+            "jarvislabs SDK", "fail",
+            f"not importable in {sys.executable}: {exc} — `pip install jarvislabs` in this interpreter",
+        ))
+
+    for binary in ("ssh", "scp", "curl"):
+        found = shutil.which(binary)
+        rows.append((f"bin:{binary}", "ok" if found else "fail", found or "not on PATH"))
+
+    jl_cli = shutil.which("jl")
+    rows.append(("jl CLI", "ok" if jl_cli else "warn", jl_cli or "not on PATH (optional)"))
+
+    client = JarvisLabsClient()
+    active = client.get_active_instance()
+    if not active:
+        rows.append(("active instance", "warn", "none registered — `vspagent jarvis create|adopt`"))
+    else:
+        mid = str(active.get("machine_id"))
+        status = active.get("status", "Unknown")
+        rows.append((
+            "active instance",
+            "ok" if str(status).lower() == "running" else "warn",
+            f"{mid} {active.get('gpu_type', 'GPU')} [{status}] {active.get('host')}",
+        ))
+
+        # fs_id is not part of the cached record; read it from the SDK when possible.
+        fs_id = None
+        sdk = getattr(client, "_sdk_client", None)
+        if sdk is not None:
+            try:
+                for inst in sdk.instances.list():
+                    if str(getattr(inst, "machine_id", "")) == mid:
+                        fs_id = getattr(inst, "fs_id", None)
+                        break
+            except Exception:
+                pass
+        if fs_id:
+            rows.append(("persistent fs", "ok", f"fs_id={fs_id} (models cached across runs)"))
+        else:
+            rows.append((
+                "persistent fs", "warn",
+                "no --fs-id attached: every fresh instance re-downloads 20+ GB of model weights",
+            ))
+
+        if str(status).lower() == "running" and active.get("host"):
+            code, out = client.exec(
+                "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -1",
+                instance_id=mid, stream=False,
+            )
+            gpu = out.strip().splitlines()[0] if out.strip() else "no response"
+            rows.append(("ssh transport", "ok" if code == 0 and "no response" not in gpu else "fail", gpu))
+
+            code, out = client.exec("df -h /home | tail -1 | awk '{print $5\" used, \"$4\" free\"}'",
+                                    instance_id=mid, stream=False)
+            rows.append(("disk /home", "ok", out.strip() or "unknown"))
+
+    print("\nJarvisLabs harness diagnostics:\n")
+    failed = _print_checks(rows)
+    print()
+    if failed:
+        _print_error(f"{failed} check(s) failed — fix these before provisioning a GPU.")
+    else:
+        _print_success("All critical checks passed.")
+    if args.strict and failed:
+        sys.exit(1)
+
+
+def cmd_jarvis_wait(args):
+    """Block until a remote TCP port or HTTP endpoint answers."""
+    client = JarvisLabsClient()
+    if args.http:
+        _print_info(f"Waiting up to {args.timeout}s for http://127.0.0.1:{args.port}{args.path} ...")
+        ok = client.wait_for_http(
+            args.port, args.path, timeout=args.timeout, interval=args.interval, instance_id=args.id,
+        )
+    else:
+        _print_info(f"Waiting up to {args.timeout}s for TCP port {args.port} ...")
+        ok = client.wait_for_port(
+            args.port, timeout=args.timeout, interval=args.interval, instance_id=args.id,
+        )
+    if ok:
+        _print_success(f"Service on port {args.port} is ready.")
+    else:
+        _print_error(f"Service on port {args.port} did not become ready within {args.timeout}s.")
+        sys.exit(1)
+
+
+_AUDIT_SCRIPT = r"""
+for p in "$@"; do
+  if [ -L "$p" ]; then kind=link
+  elif [ -e "$p" ]; then kind=file
+  else kind=missing; fi
+  size=$(stat -Lc %s "$p" 2>/dev/null || echo 0)
+  raw=$(stat -c %s "$p" 2>/dev/null || echo 0)
+  tgt=$(readlink -f "$p" 2>/dev/null || echo "")
+  parent=$(dirname "$p")
+  if touch "$parent/.vsp_write_probe" 2>/dev/null; then w=rw; rm -f "$parent/.vsp_write_probe"; else w=ro; fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$kind" "$size" "$raw" "$w" "$p"
+done
+"""
+
+
+def cmd_jarvis_audit(args):
+    """Verify remote files exist, following symlinks, and flag read-only parents.
+
+    Built for the failure that cost ~10 GPU runs: template models are symlinks
+    into a read-only Ceph mount, plain `stat` reports the *link* length (~37
+    bytes), the harness thinks a 250 MB model is missing, and the re-download
+    then fails with "Read-only file system".
+    """
+    client = JarvisLabsClient()
+    paths = list(args.path or [])
+    if not paths:
+        _print_error("Give at least one remote path: vspagent jarvis audit /home/ComfyUI/models/vae/wan_2.1_vae.safetensors")
+        sys.exit(2)
+
+    quoted = " ".join(shlex.quote(p) for p in paths)
+    code, out = client.exec(f"bash -s -- {quoted} <<'VSP_AUDIT'\n{_AUDIT_SCRIPT}\nVSP_AUDIT",
+                            instance_id=args.id, stream=False)
+    if code != 0:
+        _print_error(f"Remote audit failed (exit {code}). Is the instance reachable?")
+        sys.exit(1)
+
+    mins = {}
+    for spec in (args.min_size or []):
+        if "=" not in spec:
+            _print_error(f"--min-size expects PATH=BYTES, got: {spec}")
+            sys.exit(2)
+        key, _, val = spec.rpartition("=")
+        try:
+            mins[key] = int(val)
+        except ValueError:
+            _print_error(f"Invalid byte count in --min-size: {spec}")
+            sys.exit(2)
+
+    rows = []
+    bad = 0
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 5:
+            continue
+        kind, size_s, raw_s, writable, path = parts
+        size = int(size_s or 0)
+        raw = int(raw_s or 0)
+        need = mins.get(path)
+
+        notes = []
+        status = "ok"
+        if kind == "missing":
+            status = "fail"
+            notes.append("MISSING")
+        elif size == 0:
+            status = "fail"
+            notes.append("broken symlink or empty file")
+        if kind == "link" and size != raw:
+            notes.append(f"symlink (link len {raw} vs target {size}) — plain `stat` would report {raw}")
+        if need is not None and size < need:
+            status = "fail"
+            notes.append(f"below required {need} bytes")
+        if writable == "ro":
+            status = "fail" if kind == "missing" else "warn"
+            notes.append("parent dir is READ-ONLY (downloads will fail here)")
+        if status == "fail":
+            bad += 1
+
+        gb = size / (1024 ** 3)
+        size_txt = f"{gb:.2f} GB" if gb >= 1 else f"{size / (1024 ** 2):.1f} MB" if size else "0 B"
+        rows.append((path, status, f"{kind:<7} {size_txt:>9}  {'; '.join(notes) or 'present'}"))
+
+    print("\nRemote asset audit:\n")
+    _print_checks(rows)
+    print()
+    if bad:
+        _print_error(f"{bad} path(s) are unusable. Fix these before starting the job.")
+        sys.exit(1)
+    _print_success(f"All {len(rows)} path(s) verified.")
+
+
 def cmd_jarvis_adopt(args):
     """Adopt an existing instance by IP."""
     client = JarvisLabsClient()
@@ -475,8 +743,20 @@ def cmd_jarvis_exec(args):
             _print_info(f"Uploading and running {args.file} on remote GPU...")
             code, out = client.run_script(args.file, instance_id=args.id, script_args=args.args)
         else:
-            _print_info(f"Executing remote command: {args.code}")
-            code, out = client.exec(args.code, instance_id=args.id, workdir=args.workdir, stream=True)
+            transport = getattr(args, "transport", "auto")
+            _print_info(f"Executing remote command via {transport}: {args.code}")
+            if transport == "jupyter":
+                # Jupyter (HTTPS :443) works when inbound SSH is blocked, but it
+                # is slower and must never be used to launch daemons — use
+                # `jarvis spawn` semantics (setsid) or SSH for long-lived jobs.
+                code, out = client.exec_jupyter(args.code, instance_id=args.id, stream=True)
+            elif transport == "ssh":
+                code, out = client.exec(
+                    args.code, instance_id=args.id, workdir=args.workdir,
+                    stream=True, prefer_jupyter=False,
+                )
+            else:
+                code, out = client.exec(args.code, instance_id=args.id, workdir=args.workdir, stream=True)
 
         if code == 0:
             _print_success("Remote execution completed with exit code 0.")
@@ -790,6 +1070,35 @@ def main():
     exec_j.add_argument("--args", help="Arguments to pass to the script")
     exec_j.add_argument("--workdir", default="/home", help="Remote working directory (default: /home)")
     exec_j.add_argument("--id", help="Instance ID to target")
+    exec_j.add_argument(
+        "--transport", choices=["auto", "ssh", "jupyter"], default="auto",
+        help="Transport for -c commands: auto (default), ssh, or jupyter (HTTPS :443, use when SSH is blocked)",
+    )
+
+    # doctor
+    doctor_p = jarvis_subs.add_parser("doctor", help="Pre-flight health check (token, SDK, transport, install drift, GPU)")
+    doctor_p.add_argument("--strict", action="store_true", help="Exit non-zero if any check fails")
+    doctor_p.add_argument("--id", help="Instance ID to probe (defaults to active instance)")
+
+    # wait
+    wait_p = jarvis_subs.add_parser("wait", help="Wait until a remote port or HTTP endpoint is ready")
+    wait_p.add_argument("port", type=int, help="Remote TCP port (e.g. 8188 for ComfyUI)")
+    wait_p.add_argument("--http", action="store_true", help="Probe HTTP instead of a raw TCP socket")
+    wait_p.add_argument("--path", default="/", help="HTTP path to probe (default: /)")
+    wait_p.add_argument("--timeout", type=int, default=600, help="Seconds to wait (default: 600)")
+    wait_p.add_argument("--interval", type=int, default=5, help="Seconds between probes (default: 5)")
+    wait_p.add_argument("--id", help="Instance ID to target")
+
+    # audit
+    audit_p = jarvis_subs.add_parser(
+        "audit", help="Verify remote files follow symlinks and are writable/downloadable",
+    )
+    audit_p.add_argument("path", nargs="*", help="Remote paths to verify")
+    audit_p.add_argument(
+        "--min-size", action="append", metavar="PATH=BYTES",
+        help="Fail if PATH is smaller than BYTES (repeatable)",
+    )
+    audit_p.add_argument("--id", help="Instance ID to target")
 
     # ssh
     ssh_p = jarvis_subs.add_parser("ssh", help="Connect to the instance via interactive SSH")
@@ -892,6 +1201,12 @@ def main():
             cmd_jarvis_destroy(args)
         elif args.jarvis_command == "exec":
             cmd_jarvis_exec(args)
+        elif args.jarvis_command == "doctor":
+            cmd_jarvis_doctor(args)
+        elif args.jarvis_command == "wait":
+            cmd_jarvis_wait(args)
+        elif args.jarvis_command == "audit":
+            cmd_jarvis_audit(args)
         elif args.jarvis_command == "ssh":
             cmd_jarvis_ssh(args)
         elif args.jarvis_command == "sync":

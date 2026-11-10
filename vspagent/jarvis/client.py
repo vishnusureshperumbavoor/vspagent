@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,14 +23,71 @@ CONFIG_DIR = Path.home() / ".vspagent"
 STATE_FILE = CONFIG_DIR / "jarvislabs_instances.json"
 CREDENTIALS_FILE = CONFIG_DIR / "jarvislabs.json"
 
+# Bump when a breaking change lands in this module so consumers can fail fast
+# instead of discovering it mid-run (e.g. a missing kwarg after provisioning).
+CLIENT_API_VERSION = 3
 
-def _find_env_token() -> Optional[str]:
-    """Search environment, .env files, and local config for JarvisLabs API token."""
+try:  # Python 3.11+
+    import tomllib as _toml
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        import tomli as _toml  # type: ignore
+    except ModuleNotFoundError:
+        _toml = None
+
+
+def _jl_cli_config_paths() -> List[Path]:
+    """Config locations used by the official `jl` CLI (platformdirs XDG)."""
+    paths = [Path.home() / ".config" / "jl" / "config.toml"]
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        paths.insert(0, Path(xdg) / "jl" / "config.toml")
+    return paths
+
+
+def _token_from_jl_cli_config() -> Optional[str]:
+    """Read the token written by `jl setup`.
+
+    The `jl` CLI stores it in ~/.config/jl/config.toml (XDG), not in the legacy
+    ~/.jarvislabs/config.json that older vspagent builds looked at. Missing this
+    path is why a machine could be fully logged in to `jl` while vspagent
+    insisted no token existed.
+    """
+    if _toml is None:
+        return None
+    for path in _jl_cli_config_paths():
+        if not path.is_file():
+            continue
+        try:
+            data = _toml.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        # `jl setup` writes [auth] token = "..." (top-level is accepted too, in
+        # case the layout changes).
+        candidates = [data.get("token")]
+        auth = data.get("auth")
+        if isinstance(auth, dict):
+            candidates.append(auth.get("token"))
+            candidates.append(auth.get("api_key"))
+        for token in candidates:
+            if isinstance(token, str) and token.strip():
+                return token.strip()
+    return None
+
+
+def find_token() -> Tuple[Optional[str], str]:
+    """Locate the JarvisLabs API token and report *where* it came from.
+
+    Returns ``(token, source)`` where source is a short human label such as
+    ``env:JL_API_KEY``, ``file:/path/.env`` or ``jl-cli:/home/u/.config/jl/config.toml``.
+    The source label exists so `vspagent jarvis doctor` can explain a
+    "no token" failure instead of just asserting one.
+    """
     # 1. Environment variables
     for key in ("JARVIS_LABS_API_TOKEN", "JL_API_KEY", "JARVISLABS_API_KEY", "JARVISLABS_TOKEN"):
         val = os.environ.get(key)
         if val and val.strip():
-            return val.strip()
+            return val.strip(), f"env:{key}"
 
     # 2. Search .env up directory tree and standard locations
     search_paths = [
@@ -56,7 +114,7 @@ def _find_env_token() -> Optional[str]:
                         k = k.strip()
                         v = v.strip().strip("'\"")
                         if k in ("JARVIS_LABS_API_TOKEN", "JL_API_KEY", "JARVISLABS_API_KEY") and v:
-                            return v
+                            return v, f"file:{p}"
             except Exception:
                 pass
 
@@ -65,21 +123,35 @@ def _find_env_token() -> Optional[str]:
         try:
             data = json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
             if data.get("token"):
-                return data["token"]
+                return data["token"], f"file:{CREDENTIALS_FILE}"
         except Exception:
             pass
 
-    # 4. ~/.jarvislabs/config.json if user used official CLI setup
+    # 4. ~/.jarvislabs/config.json if user used the older official CLI setup
     jl_config = Path.home() / ".jarvislabs" / "config.json"
     if jl_config.exists():
         try:
             data = json.loads(jl_config.read_text(encoding="utf-8"))
-            if data.get("jwt") or data.get("token") or data.get("api_key"):
-                return data.get("jwt") or data.get("token") or data.get("api_key")
+            token = data.get("jwt") or data.get("token") or data.get("api_key")
+            if token:
+                return token, f"file:{jl_config}"
         except Exception:
             pass
 
-    return None
+    # 5. Current `jl` CLI store (~/.config/jl/config.toml). Without this a host
+    #    can be fully authenticated for `jl` while vspagent reports no token.
+    token = _token_from_jl_cli_config()
+    if token:
+        for path in _jl_cli_config_paths():
+            if path.is_file():
+                return token, f"jl-cli:{path}"
+
+    return None, "none"
+
+
+def _find_env_token() -> Optional[str]:
+    """Search environment, .env files, and local config for JarvisLabs API token."""
+    return find_token()[0]
 
 
 def _find_default_ssh_key() -> Optional[str]:
@@ -442,10 +514,25 @@ class JarvisLabsClient:
         if not inst:
             raise ValueError("No active or specified instance found.")
 
+        # get_active_instance() comes from the SDK/API list, which does not
+        # include the Jupyter password. Merge in the locally saved record for the
+        # same machine_id, otherwise every HTTPS-transport call fails with
+        # "Jupyter URL or password not available" even though we stored them at
+        # registration time.
+        saved = self._load_saved_instances().get(str(inst.get("machine_id", "")))
+        if saved:
+            merged = dict(saved)
+            merged.update({k: v for k, v in inst.items() if v})
+            inst = merged
+
         jupyter_url = inst.get("jupyter_url", "")
         password = inst.get("password", "")
         if not jupyter_url or not password:
-            raise ValueError("Jupyter URL or password not available for this instance.")
+            raise ValueError(
+                "Jupyter URL or password not available for this instance. "
+                "Re-register it with `vspagent jarvis adopt <IP> --jupyter-url <url> --password <pw>`, "
+                "or use --transport ssh."
+            )
 
         base_url = jupyter_url.rstrip("/").replace("/lab", "")
         session = requests.Session()
@@ -466,7 +553,19 @@ class JarvisLabsClient:
         ws_url = f"{ws_protocol}://{host_domain}/api/kernels/{kernel_id}/channels"
         ws = websocket.create_connection(ws_url, header={"Cookie": cookie_str})
 
-        code = f"!{command}"
+        marker = "__VSP_EXIT__:"
+        # Run through a real subprocess rather than IPython's `!cmd` shell
+        # escape. `!` always replies status="ok", so failing commands looked like
+        # successes (a `test -d` on a missing dir returned 0), and anything
+        # backgrounded died with the kernel's process group.
+        code = (
+            "import subprocess as _vsp_s, sys as _vsp_sys\n"
+            f"_vsp_cmd = {json.dumps(command)}\n"
+            "_vsp_r = _vsp_s.run(['bash', '-lc', _vsp_cmd], capture_output=True, text=True)\n"
+            "_vsp_sys.stdout.write(_vsp_r.stdout)\n"
+            "_vsp_sys.stdout.write(_vsp_r.stderr)\n"
+            f"_vsp_sys.stdout.write('{marker}%d\\n' % _vsp_r.returncode)\n"
+        )
         msg_id = str(uuid.uuid4())
         execute_msg = {
             "header": {"msg_id": msg_id, "username": "vsp", "session": str(uuid.uuid4()), "msg_type": "execute_request", "version": "5.3"},
@@ -476,7 +575,11 @@ class JarvisLabsClient:
         }
         ws.send(json.dumps(execute_msg))
         out_chunks = []
-        exit_code = 0
+        kernel_ok = True
+        # Streaming filter: hold back a small tail so the internal exit marker is
+        # never echoed to the user, even when the transport splits it across
+        # chunks ("__VSP_EXIT__:" arriving as "__VSP_" + "EXIT__:0").
+        holdback = ""
 
         try:
             while True:
@@ -485,26 +588,316 @@ class JarvisLabsClient:
                 content = data.get("content", {})
                 if msg_type == "stream":
                     text = content.get("text", "")
-                    if stream:
-                        sys.stdout.write(text)
-                        sys.stdout.flush()
                     out_chunks.append(text)
+                    if stream:
+                        holdback += text
+                        keep = len(marker) + 32
+                        if len(holdback) > keep:
+                            sys.stdout.write(holdback[:-keep])
+                            sys.stdout.flush()
+                            holdback = holdback[-keep:]
                 elif msg_type == "error":
-                    exit_code = 1
+                    kernel_ok = False
                     err_text = "\n".join(content.get("traceback", []))
                     if stream:
                         sys.stderr.write(err_text + "\n")
                     out_chunks.append(err_text)
                 elif msg_type == "execute_reply":
-                    status = content.get("status")
-                    if status != "ok":
-                        exit_code = 1
+                    if content.get("status") != "ok":
+                        kernel_ok = False
                     break
         finally:
             ws.close()
             session.delete(f"{base_url}/api/kernels/{kernel_id}", headers=headers)
 
-        return exit_code, "".join(out_chunks)
+        text = "".join(out_chunks)
+        if stream and holdback:
+            cut = holdback.find(marker)
+            visible = holdback[:cut] if cut >= 0 else holdback
+            if visible:
+                sys.stdout.write(visible)
+                sys.stdout.flush()
+        exit_code = 0
+        if marker in text:
+            head, _, tail = text.rpartition(marker)
+            text = head
+            try:
+                exit_code = int(tail.strip().splitlines()[0])
+            except (ValueError, IndexError):
+                exit_code = 1
+        elif not kernel_ok:
+            exit_code = 1
+
+        return exit_code, text
+
+    def spawn(
+        self,
+        command: str,
+        log_path: str = "/tmp/vsp_spawn.log",
+        instance_id: Optional[str] = None,
+        workdir: str = "/home",
+    ) -> Tuple[int, str]:
+        """Start a long-lived background process that survives session teardown.
+
+        Always use this instead of appending ``&`` yourself. A bare ``nohup cmd &``
+        dies when the Jupyter kernel (or SSH session) is torn down because it
+        shares the process group; ``setsid`` puts it in a new session so it
+        survives. All three streams are redirected so the parent never blocks
+        waiting for a pipe to close.
+        """
+        # `cd dir; cmd &` — NOT `cd dir && cmd &`. With `&&`, bash backgrounds the
+        # whole AND-list and then blocks waiting for it, so the call hangs until
+        # the spawned process exits. A `;` separator backgrounds only the command.
+        inner = (
+            f"cd {shlex.quote(workdir)}; "
+            f"setsid nohup {command} > {shlex.quote(log_path)} 2>&1 < /dev/null &"
+        )
+        return self.exec(inner, instance_id=instance_id, workdir=workdir)
+
+    def spawn_jupyter(
+        self,
+        command: str,
+        log_path: str = "/tmp/vsp_spawn.log",
+        instance_id: Optional[str] = None,
+        workdir: str = "/home",
+    ) -> Tuple[int, str]:
+        """Same as :meth:`spawn` but forced over the Jupyter HTTPS transport."""
+        inner = (
+            f"cd {shlex.quote(workdir)}; "
+            f"setsid nohup {command} > {shlex.quote(log_path)} 2>&1 < /dev/null &"
+        )
+        return self.exec_jupyter(inner, instance_id=instance_id, stream=False)
+
+    def file_size(self, path: str, deref: bool = True, instance_id: Optional[str] = None) -> int:
+        """Remote file size in bytes, or 0 when missing.
+
+        ``deref=True`` (the default) follows symlinks, which matters because
+        JarvisLabs templates ship many models as symlinks into a read-only Ceph
+        mount (``/home/.sd``). Plain ``stat`` reports the *link* length (~37
+        bytes) for those, so callers conclude a 250 MB model is missing, try to
+        re-download it, and wget then follows the symlink into the read-only
+        mount and fails with "Read-only file system".
+        """
+        flag = "-Lc" if deref else "-c"
+        code, out = self.exec(
+            f"stat {flag} %s {shlex.quote(path)} 2>/dev/null || true",
+            instance_id=instance_id,
+            stream=False,
+        )
+        try:
+            return int(out.strip().splitlines()[-1] or "0")
+        except (ValueError, IndexError):
+            return 0
+
+    def wait_for_port(
+        self,
+        port: int,
+        timeout: int = 600,
+        interval: int = 5,
+        instance_id: Optional[str] = None,
+        host: str = "127.0.0.1",
+    ) -> bool:
+        """Block until a TCP port accepts connections on the remote host."""
+        deadline = time.time() + timeout
+        probe = f"timeout 3 bash -c '</dev/tcp/{host}/{port}' 2>/dev/null && echo open || echo closed"
+        while time.time() < deadline:
+            code, out = self.exec(probe, instance_id=instance_id, stream=False)
+            if "open" in out:
+                return True
+            time.sleep(interval)
+        return False
+
+    def wait_for_http(
+        self,
+        port: int,
+        path: str = "/",
+        timeout: int = 600,
+        interval: int = 5,
+        instance_id: Optional[str] = None,
+        host: str = "127.0.0.1",
+        accept: Tuple[str, ...] = ("200", "204", "301", "302"),
+    ) -> bool:
+        """Block until an HTTP endpoint answers with an acceptable status code.
+
+        Matches on substring, not ``str.endswith``: SSH puts host-key warnings on
+        stderr and they can land *after* the status code, which silently turned a
+        healthy 200 into a "not ready" verdict.
+        """
+        deadline = time.time() + timeout
+        url = f"http://{host}:{port}{path}"
+        probe = f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 5 {shlex.quote(url)} || true"
+        while time.time() < deadline:
+            code, out = self.exec(probe, instance_id=instance_id, stream=False)
+            if any(str(s) in out for s in accept):
+                return True
+            time.sleep(interval)
+        return False
+
+    def kill_port(self, port: int, instance_id: Optional[str] = None, wait: int = 3) -> Tuple[int, str]:
+        """Kill whatever process is listening on ``port``, without external tools.
+
+        JarvisLabs templates often have **no** ``ss``, ``lsof`` or ``fuser``
+        installed, so the usual one-liners silently match nothing and the old
+        server keeps the port, making the restart look like a no-op. This reads
+        ``/proc/net/tcp{,6}`` for the LISTEN socket inode and scans ``/proc/*/fd``
+        for the owning PID, which needs only Python.
+        """
+        script = r'''
+import os, sys, signal, time
+port = int(sys.argv[1])
+hexport = "%04X" % port
+inodes = set()
+for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+    try:
+        lines = open(path).read().splitlines()[1:]
+    except OSError:
+        continue
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 10:
+            continue
+        local, state, inode = parts[1], parts[3], parts[9]
+        if state != "0A":
+            continue
+        if local.rsplit(":", 1)[-1].upper() != hexport:
+            continue
+        inodes.add(inode)
+if not inodes:
+    print("no listener on port %d" % port)
+    sys.exit(0)
+targets = {"socket:[%s]" % i for i in inodes}
+killed = []
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        fds = os.listdir("/proc/%s/fd" % pid)
+    except OSError:
+        continue
+    for fd in fds:
+        try:
+            link = os.readlink("/proc/%s/fd/%s" % (pid, fd))
+        except OSError:
+            continue
+        if link in targets:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+                killed.append(pid)
+            except OSError:
+                pass
+            break
+print("killed %s on port %d" % (",".join(killed) or "nothing", port))
+'''
+        quoted = shlex.quote(script)
+        code, out = self.exec(
+            f"python3 -c {quoted} {port}", instance_id=instance_id, stream=False,
+        )
+        # Belt-and-braces: also drop a server started as `python main.py --port N`.
+        self.exec(
+            f"pkill -f 'python main[.]py --port {port}' 2>/dev/null || true; sleep {wait}",
+            instance_id=instance_id, stream=False,
+        )
+        return code, out
+
+    def restart_service(
+        self,
+        start_cmd: str,
+        port: int,
+        ready_path: str = "/",
+        timeout: int = 600,
+        workdir: str = "/home",
+        log_path: str = "/tmp/vsp_service.log",
+        instance_id: Optional[int] = None,
+    ) -> bool:
+        """Restart a port-based service safely, then wait for it to answer.
+
+        Three traps this avoids:
+
+        1. Killing by command-line pattern is fragile. A service started as
+           ``cd dir && python main.py`` has the cmdline ``python main.py``, so a
+           pattern like ``ComfyUI/main.py`` never matches it.
+        2. Killing and starting in one shell line is self-destructive: the start
+           half contains the same text, so ``pkill -f`` matches the shell running
+           the command and kills itself before the service launches.
+        3. Templates may not ship ``ss``/``lsof``/``fuser`` at all.
+
+        So: kill by port in its own call, then spawn in a second call.
+        """
+        self.kill_port(port, instance_id=instance_id)
+        self.spawn(start_cmd, log_path=log_path, instance_id=instance_id, workdir=workdir)
+        ok = self.wait_for_http(port, ready_path, timeout=timeout, instance_id=instance_id)
+        if not ok:
+            code, tail = self.exec(f"tail -40 {shlex.quote(log_path)}", instance_id=instance_id, stream=False)
+            raise RuntimeError(f"Service on port {port} did not become ready in {timeout}s:\n{tail[-3000:]}")
+        return True
+
+    def instance(
+        self,
+        gpu_type: str = "A100",
+        template: str = "comfyui",
+        storage: int = 100,
+        region: str = "IN2",
+        name: str = "vsp-agent",
+        destroy_on_exit: bool = True,
+        fs_id: Optional[int] = None,
+    ):
+        """Context manager that guarantees the GPU is destroyed on exit.
+
+        ``finally`` blocks do not run on SIGINT/SIGTERM, and a SIGKILL skips them
+        entirely, which leaves a GPU billing by the hour. This registers an
+        ``atexit`` hook plus signal handlers so cleanup happens on Ctrl-C too.
+        """
+        import atexit
+        import contextlib
+        import signal
+
+        if not self._sdk_client:
+            raise RuntimeError("jarvislabs SDK is not available; cannot create instances.")
+
+        created = self._sdk_client.instances.create(
+            gpu_type=gpu_type,
+            name=name,
+            template=template,
+            storage=storage,
+            region=region,
+            fs_id=fs_id,
+        )
+        machine_id = int(created.machine_id)
+        destroyed = {"done": False}
+
+        def _cleanup(*_args):
+            if destroyed["done"] or not destroy_on_exit:
+                return
+            destroyed["done"] = True
+            try:
+                self._sdk_client.instances.destroy(machine_id)
+                print(f"[vspagent] destroyed instance {machine_id}", file=sys.stderr)
+            except Exception as exc:  # pragma: no cover
+                print(f"[vspagent] WARNING: could not destroy {machine_id}: {exc}", file=sys.stderr)
+
+        atexit.register(_cleanup)
+        previous = {}
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                previous[sig] = signal.getsignal(sig)
+                signal.signal(sig, lambda s, f: (_cleanup(), sys.exit(130)))
+            except (ValueError, OSError):  # not main thread
+                pass
+
+        @contextlib.contextmanager
+        def _ctx():
+            try:
+                yield machine_id
+            finally:
+                _cleanup()
+                atexit.unregister(_cleanup)
+                for sig, handler in previous.items():
+                    try:
+                        signal.signal(sig, handler)
+                    except (ValueError, OSError):
+                        pass
+
+        return _ctx()
 
     def upload_jupyter(
         self,
@@ -570,6 +963,10 @@ class JarvisLabsClient:
 
         ssh_cmd = [
             "ssh",
+            "-n",  # never forward local stdin: a forwarded stdin keeps the channel
+                   # open, so `cmd &` looks like it hangs until the local process
+                   # is killed. This is why `spawn()`/background jobs appeared to
+                   # time out even with all remote streams redirected.
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "LogLevel=ERROR",
