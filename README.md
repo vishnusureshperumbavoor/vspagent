@@ -1,194 +1,243 @@
 # ⚡ vspagent
 
-[![PyPI version](https://badge.fury.io/py/vspagent.svg)](https://pypi.org/project/vspagent/)
-[![Python Versions](https://img.shields.io/pypi/pyversions/vspagent.svg)](https://pypi.org/project/vspagent/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**Terminal coding agent powered by OpenAI-compatible LLM APIs.**
 
-**Universal Hybrid Agent Harness & Cloud GPU Execution Runtime.**
+`vspagent` is a local-first coding CLI in the spirit of Codex, Claude Code and
+OpenCode. It runs in your terminal, reads and edits files, executes commands with
+your approval, keeps resumable sessions, and works with Kimi, OpenAI, DeepSeek,
+Qwen, Grok, Gemini's compatibility endpoint and any local OpenAI-compatible
+server.
 
-`vspagent` is a lightweight, extensible agent harness that bridges local development environments, web backends, and AI coding agents to high-performance Cloud GPUs with **zero local VRAM/GPU requirements**:
-* **Google Colab via Model Context Protocol (MCP)** (Tesla T4, A100, V100)
-* **JarvisLabs On-Demand Dedicated Cloud GPUs** (NVIDIA A30, A100, H100, RTX 6000 Ada)
-
-Whether you are running deep learning inference, evaluating models, or dispatching heavy real-time audio/vision pipelines, `vspagent` acts as your unified execution harness—managing background daemons, MCP protocol bridges, cloud GPU instances, SSH port tunnels, and file synchronization seamlessly.
-
-> **Fine-tuning moved.** Dataset preparation, LoRA fine-tuning, GGUF quantization and Hugging Face publishing now live in the independent [vsptrainagents](../vsptrainagents) project.
+> **v4 is the coding-agent release.** The old Colab/Jarvis harness is gone. It
+> remains available in git at tag `v3.3.0-harness` and on PyPI as `vspagent==3.3.0`.
+> Fine-tuning and dataset preparation live in [vsptrainagents](../vsptrainagents).
 
 ---
 
-## 🌟 Key Capabilities
+## 📦 Install
 
-### Google Colab MCP Runtime
-- 🤖 **Agentic MCP Runtime Harness**: Manages the `colab-mcp` stdio daemon, JSON-RPC protocol, tool registry, and background execution behind clean, Pythonic abstractions.
-- ⚙️ **Persistent Background Daemon**: Auto-spawning local daemon that preserves browser pairings, tool availability, and GPU sessions across separate terminal commands.
-- 👤 **Intelligent Account & Profile Routing**: Automatically detects signed-in Google/Chrome profiles across Linux, WSL, Windows, and macOS, dispatching browser pairing to the desired Google account.
-- 🚀 **Remote Cloud GPU Dispatch**: Injects, monitors, and cleans up remote execution payloads on Colab runtimes with real-time log streaming and traceback extraction.
-
-### JarvisLabs Cloud GPU Harness
-- ⚡ **Dedicated GPU Orchestration**: Adopt, provision, pause, resume, and terminate on-demand cloud GPU instances (A30, A100, H100) to optimize cloud compute spend.
-- 🔒 **Cloud-Hardened SSH Execution**: Run remote shell commands or dispatch local Python scripts with automated SSH key detection and real-time streaming output.
-- 🌐 **SSH Port Tunneling (Service Bridging)**: Forward remote GPU microservices (FastAPI, Flask, Gradio, WebSockets on ports `8000`, `7860`, `5000`) directly to `http://localhost:8000`. Local clients and web frontends consume cloud models as if running locally.
-- 📁 **High-Speed Bi-Directional Sync**: Upload code and datasets or download model artifacts and outputs via SCP.
-- 📖 **Comprehensive Guide**: See [docs/JARVISLABS.md](docs/JARVISLABS.md) for complete reference.
-
-### Universal Web & Developer Tooling
-- 🔌 **Drop-in Web Framework Adapters**: Ready-to-use FastAPI routers and Flask blueprints for zero-friction service integration.
-- 🖥️ **Interactive Terminal CLI**: Built-in developer CLI with rich tables, connection health checks, daemon management, and direct code dispatch (`vspagent colab`, `vspagent jarvis`, `vspagent daemon`).
-- 🪶 **Zero-Dependency Local Footprint**: Keeps local environments clean (<1MB). Heavy machine learning dependencies (`torch`, `cuda`, `transformers`) stay isolated on the remote cloud GPU.
-
----
-
-## 📦 Installation
+### One-line install (Linux / macOS)
 
 ```bash
-pip install vspagent
-# or using uv:
+curl -fsSL https://github.com/vishnusureshperumbavoor/vspagent/releases/latest/download/install.sh | sh
+```
+
+The installer uses [uv](https://docs.astral.sh/uv/), installs into `~/.local/bin`
+and never needs root privileges. Pin a release by passing the variable to the
+shell, not to `curl`:
+
+```bash
+curl -fsSL https://github.com/vishnusureshperumbavoor/vspagent/releases/latest/download/install.sh \
+  | VSPAGENT_VERSION=4.0.0 sh
+```
+
+If the release asset is not attached yet, use the repo script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vishnusureshperumbavoor/vspagent/main/install.sh | sh
+```
+
+### pip / uv
+
+```bash
 uv tool install vspagent
+# or
+pip install vspagent
 ```
 
----
+Both `vspagent` and `vsp` are installed.
 
-## 🛠️ Quickstart
-
-### 1. Python SDK — Direct Agent Harness
-
-```python
-import asyncio
-from vspagent import ColabClient
-
-async def main():
-    colab = ColabClient()
-    
-    # 1. Connect harness with the user's preferred Google account
-    print("Initiating Colab agent handshake...")
-    await colab.connect_browser(profile_directory="Default")
-    
-    # 2. Await tab authorization in Chrome
-    await colab.ensure_connected(timeout=60.0)
-    print(f"Connected to Cloud GPU: {colab.gpu_info}")
-    
-    # 3. Dispatch remote GPU execution
-    payload = """
-import torch
-print("Agent GPU Ready:", torch.cuda.get_device_name(0))
-    """
-    res = await colab.execute_code(payload, keep_cell=False)
-    print("Remote Output:\n", res["output"])
-
-asyncio.run(main())
-```
-
----
-
-### 2. FastAPI Web Harness (e.g. Vibe-ML-Studio, Vibe-MI-Stdio)
-
-Mount the harness router directly into your FastAPI application:
-
-```python
-from fastapi import FastAPI
-from vspagent.colab.integrations import get_colab_router
-
-app = FastAPI(title="My GPU-Accelerated Service")
-
-# Exposes /colab/status, /colab/accounts, /colab/connect, /colab/execute
-app.include_router(get_colab_router(), prefix="/api")
-```
-
----
-
-### 3. Flask Web Harness (e.g. Karaoke Extractor)
-
-```python
-from flask import Flask
-from vspagent.colab.integrations import get_colab_blueprint
-
-app = Flask(__name__)
-
-# Exposes /colab/status, /colab/accounts, /colab/connect, /colab/execute
-app.register_blueprint(get_colab_blueprint(), url_prefix="/api/colab")
-```
-
----
-
-### 4. JarvisLabs Cloud GPU Harness
-
-#### Python SDK:
-```python
-from vspagent.jarvis import JarvisLabsClient
-
-client = JarvisLabsClient()
-
-# 1. Execute remote commands on GPU
-code, output = client.exec("nvidia-smi")
-
-# 2. Upload and run a script remotely
-client.run_script("scripts/train.py", script_args="--epochs 5")
-
-# 3. Tunnel remote FastAPI/Gradio microservice port to localhost:8000
-tunnel = client.tunnel(remote_port=8000, local_port=8000)
-print(f"Service live at: {tunnel['url']}")
-```
-
-#### CLI:
-```bash
-# Register an active instance by IP
-vspagent jarvis adopt 217.18.55.207 --gpu A30
-
-# Check instance specs & connection status
-vspagent jarvis status
-
-# Run commands or dispatch Python scripts directly to Cloud GPU
-vspagent jarvis exec -c "nvidia-smi"
-vspagent jarvis exec -f ./inference.py
-
-# Forward remote microservice port to localhost (e.g. port 8000)
-vspagent jarvis tunnel 8000
-
-# Pause instance to stop compute billing
-vspagent jarvis pause
-```
-
----
-
-### 5. Fine-Tuning, Quantization & HF Publishing
-
-This harness no longer ships a trainer. Dataset preparation, LoRA fine-tuning,
-GGUF quantization and Hugging Face publishing are maintained in the separate
-[vsptrainagents](../vsptrainagents) project, which vendors the same JarvisLabs
-transport and can be installed on its own:
+### Uninstall
 
 ```bash
-pip install vsptrainagents
-
-vsptrainagents dataset parse-whatsapp -i ./assets/whatsapp_chats/ -a "Your Name"
-vsptrainagents train --backend jarvis --dataset ./train_persona.jsonl --plan
+bash install.sh --uninstall
+# or
+uv tool uninstall vspagent
 ```
 
 ---
 
-### 6. Google Colab MCP CLI & Daemon
+## 🔑 Add an API key
 
 ```bash
-# Discover available Google / Chrome profiles
-vspagent colab accounts
-
-# Pair terminal session with Colab tab (persisted in background daemon)
-vspagent colab connect
-
-# Inspect Colab MCP harness status & GPU hardware
-vspagent colab status
-
-# Dispatch inline code to Colab GPU
-vspagent colab exec -c "import torch; print(torch.cuda.is_available())"
-
-# Dispatch a local Python script to remote Colab GPU
-vspagent colab exec -f ./train_model.py
-
-# Daemon management
-vspagent daemon status
-vspagent daemon logs
-vspagent daemon stop
+vspagent auth login kimi
+vspagent auth status
 ```
+
+Key resolution order:
+
+1. environment variable (`KIMI_API_KEY`, `OPENAI_API_KEY`, …)
+2. OS keyring
+3. `~/.config/vspagent/auth.json` with mode `600`
+
+Keys are never written to sessions, logs or shell commands.
+
+```bash
+export KIMI_API_KEY=...        # CI / one-off use
+vspagent auth logout kimi      # remove a stored key
+```
+
+Kimi is the default provider and uses Moonshot's OpenAI-compatible endpoint:
+
+```text
+https://api.moonshot.ai/v1
+```
+
+---
+
+## 🚀 Quickstart
+
+```bash
+cd ~/projects/my-app
+
+# interactive coding session
+vspagent
+
+# one-shot task
+vspagent "find the failing test and fix it"
+
+# choose a model
+vspagent --model kimi-k2.7-code "refactor the config loader"
+
+# resume the most recent session
+vspagent --continue
+
+# inspect available models
+vspagent models
+```
+
+Inside an interactive session:
+
+```text
+/help                 show commands
+/model [name]         show or change the model
+/models               list models from the provider
+/provider             show provider details
+/permissions [mode]   ask | allowlist | yolo
+/clear                clear the conversation
+/compact              trim old history
+/session              session id and token usage
+/tools                list tools
+/quit                 exit
+```
+
+---
+
+## 🧰 Tools
+
+| Tool | Purpose |
+| :--- | :--- |
+| `read_file` | Read text with line numbers |
+| `write_file` | Create or overwrite a file |
+| `edit_file` | Exact-string edit with diff preview |
+| `list_dir` | List files and directories |
+| `glob` | Find files by pattern |
+| `grep` | Regex content search |
+| `shell` | Run bash with captured output |
+| `todo` | Track multi-step work |
+
+Every file operation is confined to the workspace. Paths that resolve outside it
+are rejected, including symlink escapes.
+
+---
+
+## 🔐 Permissions
+
+| Mode | Behaviour |
+| :--- | :--- |
+| `ask` | Read/search auto-approved; writes and shell ask first |
+| `allowlist` | File edits and read-only shell commands auto-approved; destructive shell asks |
+| `yolo` | Everything runs without prompts |
+
+Set it per run:
+
+```bash
+vspagent --permission-mode allowlist
+```
+
+or in config:
+
+```toml
+[general]
+permission_mode = "ask"
+```
+
+The shell tool strips provider API keys from the child environment and is never
+invoked with `shell=True`.
+
+---
+
+## ⚙️ Configuration
+
+```bash
+vspagent config --init     # write ~/.config/vspagent/config.toml
+vspagent config            # show the effective config
+```
+
+Example:
+
+```toml
+[general]
+provider = "kimi"
+permission_mode = "ask"
+max_iterations = 30
+timeout = 120.0
+
+[providers.kimi]
+type = "openai_compatible"
+base_url = "https://api.moonshot.ai/v1"
+api_key_env = "KIMI_API_KEY"
+model = "kimi-k2.7-code"
+auth_style = "bearer"
+```
+
+Any OpenAI-compatible server works:
+
+```toml
+[providers.local]
+type = "openai_compatible"
+base_url = "http://127.0.0.1:11434/v1"
+api_key_env = "LOCAL_API_KEY"
+model = "qwen2.5-coder"
+auth_style = "none"
+```
+
+Environment overrides: `VSPAGENT_PROVIDER`, `VSPAGENT_MODEL`,
+`VSPAGENT_BASE_URL`, `VSPAGENT_PERMISSION_MODE`, `VSPAGENT_CONFIG`.
+
+---
+
+## 🧱 Architecture
+
+| Path | Responsibility |
+| :--- | :--- |
+| `vspagent/cli.py` | Argument wiring and subcommands |
+| `vspagent/config.py` | Config and provider registry |
+| `vspagent/auth.py` | Env → keyring → private-file keys |
+| `vspagent/security.py` | Redaction, private files, path containment |
+| `vspagent/session.py` | Resumable JSON sessions |
+| `vspagent/permissions.py` | ask / allowlist / yolo policy |
+| `vspagent/agent/loop.py` | Stream → tool calls → repeat |
+| `vspagent/agent/providers/` | OpenAI-compatible HTTP adapter |
+| `vspagent/agent/tools/` | File, search, shell and todo tools |
+| `vspagent/agent/ui/` | Rich + prompt_toolkit REPL |
+
+---
+
+## ✅ Development
+
+```bash
+uv venv
+uv pip install -r requirements.txt -r requirements-dev.txt
+.venv/bin/ruff check .
+.venv/bin/python scripts/check_quality.py
+.venv/bin/python -m pytest
+```
+
+CI runs the same three commands. Tests use a fake HTTP transport; no API key or
+network access is required.
+
+See [AGENTS.md](AGENTS.md) and [SECURITY.md](SECURITY.md).
 
 ---
 

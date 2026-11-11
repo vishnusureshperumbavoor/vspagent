@@ -1,12 +1,21 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build outputs
 build/
-develop-eggs/
 dist/
-downloads/
+*.egg-info/
+develop-eggs/
 eggs/
 .eggs/
 lib/
@@ -15,12 +24,20 @@ parts/
 sdist/
 var/
 wheels/
-*.egg-info/
-.installed.cfg
 *.egg
-venv/
-env/
-.venv
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and local state
 .env
+.env.local
+*.secret
 
-
+# OS & editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

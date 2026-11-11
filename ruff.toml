@@ -1,0 +1,29 @@
+# Lint configuration.
+#
+# Ratchet rule: this file may gain rules, not lose them.
+
+line-length = 100
+target-version = "py312"
+exclude = [
+    ".venv",
+    "quality",
+    "build",
+    "dist",
+]
+
+[lint]
+select = [
+    "E4",   # import syntax
+    "E7",   # statements
+    "E9",   # runtime errors
+    "F",    # pyflakes
+    "I",    # import order
+    "UP",   # pyupgrade
+    "B",    # bugbear
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["B011"]        # assert False is fine in tests
+
+[lint.isort]
+combine-as-imports = true

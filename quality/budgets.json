@@ -1,0 +1,27 @@
+{
+  "$comment": [
+    "RATCHET FILE. Limits may only go DOWN.",
+    "Raising a limit is a deliberate act: it shows up in review as an edit to this file.",
+    "If you need to add a line to a file that is at its cap, extract something first.",
+    "Caps are the size at the time the gate was introduced, not an aspiration."
+  ],
+  "default_file_max": 500,
+  "default_file_warn": 300,
+  "default_function_max": 120,
+  "default_function_warn": 80,
+  "files": {},
+  "functions": {},
+  "vendored": {
+    "$comment": "v4 has no vendored transport. Keep the mechanism for future frozen code."
+  },
+  "duplication": {
+    "$comment": "The agent starts at zero duplicated lines; keep it there.",
+    "window": 50,
+    "min_tokens": 80,
+    "min_lines": 8,
+    "max_duplicate_lines": 0
+  },
+  "import_exceptions": {
+    "$comment": "Recorded defects, not permissions. This map may only shrink."
+  }
+}

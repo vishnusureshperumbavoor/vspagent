@@ -54,7 +54,7 @@ echo Next steps:
 echo 1. Test locally: pip install -e .
 echo 2. Upload to PyPI: twine upload dist/*
 echo.
-echo See DEPLOYMENT_GUIDE.md for more details.
+echo See README.md for install and release steps.
 echo.
 
 pause
