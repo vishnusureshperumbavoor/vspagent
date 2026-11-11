@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # vspagent installer for Linux and macOS.
 #
 #   curl -fsSL https://github.com/vishnusureshperumbavoor/vspagent/releases/latest/download/install.sh | sh
@@ -8,7 +8,7 @@
 #   VSPAGENT_GIT_REF   GitHub tag/branch fallback (default: v<version>)
 #   VSPAGENT_REPO      GitHub repo used for the source fallback
 #   VSPAGENT_BIN_DIR   optional install directory hint
-set -euo pipefail
+set -eu
 
 REPO="${VSPAGENT_REPO:-vishnusureshperumbavoor/vspagent}"
 VERSION="${VSPAGENT_VERSION:-4.0.0}"
@@ -18,18 +18,21 @@ if [ "$VERSION" = "latest" ]; then
     GIT_REF="${VSPAGENT_GIT_REF:-master}"
 fi
 
+# POSIX sh has no $'...' strings; build ANSI escapes with printf instead.
 if [ -t 1 ]; then
-    BOLD=$'\033[1m'
-    DIM=$'\033[2m'
-    GREEN=$'\033[32m'
-    CYAN=$'\033[36m'
-    YELLOW=$'\033[33m'
-    RESET=$'\033[0m'
+    BOLD="$(printf '\033[1m')"
+    DIM="$(printf '\033[2m')"
+    GREEN="$(printf '\033[32m')"
+    CYAN="$(printf '\033[36m')"
+    MAGENTA="$(printf '\033[35m')"
+    YELLOW="$(printf '\033[33m')"
+    RESET="$(printf '\033[0m')"
 else
     BOLD=""
     DIM=""
     GREEN=""
     CYAN=""
+    MAGENTA=""
     YELLOW=""
     RESET=""
 fi
@@ -46,9 +49,9 @@ EOF
 uninstall() {
     if command -v uv >/dev/null 2>&1; then
         uv tool uninstall vspagent || true
-        printf "  ${GREEN}✓${RESET} %s removed\n" "vspagent"
+        printf "  %s✓%s %svspagent%s removed\n" "$GREEN" "$RESET" "$BOLD" "$RESET"
     else
-        printf "  %s uv is not installed; nothing to uninstall.%s\n" "$YELLOW" "$RESET" >&2
+        printf "  %suv is not installed; nothing to uninstall.%s\n" "$YELLOW" "$RESET" >&2
     fi
 }
 
@@ -64,15 +67,16 @@ fi
 case "$(uname -s)" in
     Linux|Darwin) ;;
     *)
-        printf "  %s vspagent currently supports Linux and macOS only.%s\n" "$YELLOW" "$RESET" >&2
+        printf "  %svspagent currently supports Linux and macOS only.%s\n" \
+            "$YELLOW" "$RESET" >&2
         exit 1
         ;;
 esac
 
 if ! command -v uv >/dev/null 2>&1; then
-    printf "  ${DIM}uv not found; installing it from astral.sh ...${RESET}\n"
+    printf "  %suv not found; installing it from astral.sh ...%s\n" "$DIM" "$RESET"
     if ! command -v curl >/dev/null 2>&1; then
-        printf "  %s curl is required to bootstrap uv.%s\n" "$YELLOW" "$RESET" >&2
+        printf "  %scurl is required to bootstrap uv.%s\n" "$YELLOW" "$RESET" >&2
         exit 1
     fi
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -84,8 +88,8 @@ install_pypi() {
 }
 
 install_github() {
-    local ref="$1"
-    uv tool install --force --quiet "vspagent @ git+https://github.com/${REPO}.git@${ref}"
+    REF="$1"
+    uv tool install --force --quiet "vspagent @ git+https://github.com/${REPO}.git@${REF}"
 }
 
 pypi_has_version() {
@@ -94,21 +98,22 @@ pypi_has_version() {
 }
 
 if [ "$VERSION" = "latest" ]; then
-    printf "  ${DIM}Installing vspagent from GitHub (${GIT_REF}) ...${RESET}\n"
+    printf "  %sInstalling vspagent from GitHub (%s) ...%s\n" "$DIM" "$GIT_REF" "$RESET"
     install_github "$GIT_REF"
     PACKAGE="vspagent"
 else
     PACKAGE="vspagent==${VERSION}"
     if pypi_has_version; then
-        printf "  ${DIM}Installing ${PACKAGE} from PyPI ...${RESET}\n"
+        printf "  %sInstalling %s from PyPI ...%s\n" "$DIM" "$PACKAGE" "$RESET"
         if ! install_pypi; then
-            printf "  ${DIM}PyPI install failed; using GitHub (${GIT_REF}) ...${RESET}\n"
+            printf "  %sPyPI install failed; using GitHub (%s) ...%s\n" \
+                "$DIM" "$GIT_REF" "$RESET"
             install_github "$GIT_REF" || install_github master
         fi
     else
-        printf "  ${DIM}Installing ${PACKAGE} from GitHub (${GIT_REF}) ...${RESET}\n"
+        printf "  %sInstalling %s from GitHub (%s) ...%s\n" "$DIM" "$PACKAGE" "$GIT_REF" "$RESET"
         if ! install_github "$GIT_REF"; then
-            printf "  ${DIM}Tag ${GIT_REF} not found; using master ...${RESET}\n"
+            printf "  %sTag %s not found; using master ...%s\n" "$DIM" "$GIT_REF" "$RESET"
             install_github master
         fi
     fi
@@ -118,23 +123,44 @@ ACTUAL_BIN="$(uv tool dir --bin 2>/dev/null || printf '%s' "$BIN_DIR")"
 INSTALLED_VERSION="$("$ACTUAL_BIN/vspagent" --version 2>/dev/null | awk '{print $NF}' || true)"
 [ -n "$INSTALLED_VERSION" ] || INSTALLED_VERSION="$VERSION"
 
+WIDTH="${COLUMNS:-}"
+if [ -z "$WIDTH" ] && command -v tput >/dev/null 2>&1; then
+    WIDTH="$(tput cols 2>/dev/null || true)"
+fi
+case "$WIDTH" in
+    ''|*[!0-9]*) WIDTH=80 ;;
+esac
+
 printf "\n"
-printf "  ${GREEN}✓${RESET} ${BOLD}vspagent ${INSTALLED_VERSION}${RESET} is installed\n"
-printf "  ${DIM}──────────────────────────────────────────────${RESET}\n"
-printf "  ${DIM}binary${RESET}    %s\n" "$ACTUAL_BIN/vspagent"
-printf "  ${DIM}alias${RESET}     %s\n" "$ACTUAL_BIN/vsp"
-printf "  ${DIM}provider${RESET}  Kimi (default, OpenAI-compatible)\n"
-printf "  ${DIM}config${RESET}    ~/.config/vspagent/config.toml\n"
+if [ "$WIDTH" -ge 80 ]; then
+    printf "  %s%s%s\n" "$CYAN" "██╗   ██╗███████╗██████╗      █████╗  ██████╗ ███████╗███╗   ██╗████████╗" "$RESET"
+    printf "  %s%s%s\n" "$CYAN" "██║   ██║██╔════╝██╔══██╗    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝" "$RESET"
+    printf "  %s%s%s\n" "$CYAN" "██║   ██║███████╗██████╔╝    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║" "$RESET"
+    printf "  %s%s%s\n" "$CYAN" "╚██╗ ██╔╝╚════██║██╔═══╝     ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║" "$RESET"
+    printf "  %s%s%s\n" "$CYAN" " ╚████╔╝ ███████║██║         ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║" "$RESET"
+    printf "  %s%s%s\n" "$CYAN" "  ╚═══╝  ╚══════╝╚═╝         ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝" "$RESET"
+else
+    printf "  %sVSP AGENT%s\n" "$BOLD$CYAN" "$RESET"
+fi
+printf "  %sterminal coding agent · v%s%s\n" "$DIM" "$INSTALLED_VERSION" "$RESET"
+printf "  %s──────────────────────────────────────────────────────────────%s\n" "$DIM" "$RESET"
 printf "\n"
-printf "  ${BOLD}Get started${RESET}\n"
-printf "    ${CYAN}vspagent auth login kimi${RESET}\n"
-printf "    ${CYAN}vspagent${RESET}\n"
+printf "  %s✓%s %sInstalled successfully%s\n" "$GREEN" "$RESET" "$BOLD" "$RESET"
 printf "\n"
-printf "  ${DIM}docs${RESET}      https://github.com/${REPO}\n"
+printf "  %sbinary%s    %s\n" "$DIM" "$RESET" "$ACTUAL_BIN/vspagent"
+printf "  %salias%s     %s\n" "$DIM" "$RESET" "$ACTUAL_BIN/vsp"
+printf "  %sprovider%s  Kimi (default, OpenAI-compatible)\n" "$DIM" "$RESET"
+printf "  %sconfig%s    ~/.config/vspagent/config.toml\n" "$DIM" "$RESET"
+printf "\n"
+printf "  %sGet started%s\n" "$BOLD" "$RESET"
+printf "    %svspagent auth login kimi%s\n" "$MAGENTA" "$RESET"
+printf "    %svspagent%s\n" "$MAGENTA" "$RESET"
+printf "\n"
+printf "  %sdocs%s      https://github.com/%s\n" "$DIM" "$RESET" "$REPO"
 
 if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qx "$ACTUAL_BIN"; then
     printf "\n"
-    printf "  ${YELLOW}Add ${ACTUAL_BIN} to PATH:${RESET}\n"
+    printf "  %sAdd %s to PATH%s\n" "$YELLOW" "$ACTUAL_BIN" "$RESET"
     printf "    export PATH=\"%s:\$PATH\"\n" "$ACTUAL_BIN"
 fi
 printf "\n"
