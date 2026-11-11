@@ -5,7 +5,8 @@
 #
 # Environment:
 #   VSPAGENT_VERSION   pinned version (default: 4.0.0), or "latest"
-#   VSPAGENT_REPO      GitHub repo used for uv's bootstrap message
+#   VSPAGENT_GIT_REF   GitHub tag/branch fallback (default: v<version>)
+#   VSPAGENT_REPO      GitHub repo used for the source fallback
 #   VSPAGENT_BIN_DIR   optional install directory hint
 set -euo pipefail
 
@@ -15,6 +16,22 @@ BIN_DIR="${VSPAGENT_BIN_DIR:-$HOME/.local/bin}"
 GIT_REF="${VSPAGENT_GIT_REF:-v${VERSION}}"
 if [ "$VERSION" = "latest" ]; then
     GIT_REF="${VSPAGENT_GIT_REF:-master}"
+fi
+
+if [ -t 1 ]; then
+    BOLD=$'\033[1m'
+    DIM=$'\033[2m'
+    GREEN=$'\033[32m'
+    CYAN=$'\033[36m'
+    YELLOW=$'\033[33m'
+    RESET=$'\033[0m'
+else
+    BOLD=""
+    DIM=""
+    GREEN=""
+    CYAN=""
+    YELLOW=""
+    RESET=""
 fi
 
 usage() {
@@ -29,9 +46,9 @@ EOF
 uninstall() {
     if command -v uv >/dev/null 2>&1; then
         uv tool uninstall vspagent || true
-        echo "Removed the vspagent uv tool."
+        printf "  ${GREEN}✓${RESET} %s removed\n" "vspagent"
     else
-        echo "uv is not installed; nothing to uninstall." >&2
+        printf "  %s uv is not installed; nothing to uninstall.%s\n" "$YELLOW" "$RESET" >&2
     fi
 }
 
@@ -47,47 +64,77 @@ fi
 case "$(uname -s)" in
     Linux|Darwin) ;;
     *)
-        echo "vspagent currently supports Linux and macOS only." >&2
+        printf "  %s vspagent currently supports Linux and macOS only.%s\n" "$YELLOW" "$RESET" >&2
         exit 1
         ;;
 esac
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "uv not found; installing it from https://astral.sh/uv ..."
+    printf "  ${DIM}uv not found; installing it from astral.sh ...${RESET}\n"
     if ! command -v curl >/dev/null 2>&1; then
-        echo "curl is required to bootstrap uv." >&2
+        printf "  %s curl is required to bootstrap uv.%s\n" "$YELLOW" "$RESET" >&2
         exit 1
     fi
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
+install_pypi() {
+    uv tool install --force --quiet "$PACKAGE"
+}
+
+install_github() {
+    local ref="$1"
+    uv tool install --force --quiet "vspagent @ git+https://github.com/${REPO}.git@${ref}"
+}
+
+pypi_has_version() {
+    command -v curl >/dev/null 2>&1 || return 1
+    curl -fsS -o /dev/null "https://pypi.org/pypi/vspagent/${VERSION}/json" 2>/dev/null
+}
+
 if [ "$VERSION" = "latest" ]; then
+    printf "  ${DIM}Installing vspagent from GitHub (${GIT_REF}) ...${RESET}\n"
+    install_github "$GIT_REF"
     PACKAGE="vspagent"
 else
     PACKAGE="vspagent==${VERSION}"
-fi
-
-echo "Installing ${PACKAGE} from PyPI with uv ..."
-if ! uv tool install --force "$PACKAGE"; then
-    echo
-    echo "PyPI does not have ${PACKAGE} yet; installing from GitHub (${GIT_REF}) ..."
-    if ! uv tool install --force "vspagent @ git+https://github.com/${REPO}.git@${GIT_REF}"; then
-        echo "Git tag ${GIT_REF} failed; trying the default branch ..." >&2
-        uv tool install --force "vspagent @ git+https://github.com/${REPO}.git@master"
+    if pypi_has_version; then
+        printf "  ${DIM}Installing ${PACKAGE} from PyPI ...${RESET}\n"
+        if ! install_pypi; then
+            printf "  ${DIM}PyPI install failed; using GitHub (${GIT_REF}) ...${RESET}\n"
+            install_github "$GIT_REF" || install_github master
+        fi
+    else
+        printf "  ${DIM}Installing ${PACKAGE} from GitHub (${GIT_REF}) ...${RESET}\n"
+        if ! install_github "$GIT_REF"; then
+            printf "  ${DIM}Tag ${GIT_REF} not found; using master ...${RESET}\n"
+            install_github master
+        fi
     fi
 fi
 
-mkdir -p "$BIN_DIR"
-if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
-    echo
-    echo "Add this to your shell profile so 'vspagent' is on PATH:"
-    echo "  export PATH=\"$BIN_DIR:\$PATH\""
-fi
+ACTUAL_BIN="$(uv tool dir --bin 2>/dev/null || printf '%s' "$BIN_DIR")"
+INSTALLED_VERSION="$("$ACTUAL_BIN/vspagent" --version 2>/dev/null | awk '{print $NF}' || true)"
+[ -n "$INSTALLED_VERSION" ] || INSTALLED_VERSION="$VERSION"
 
-echo
-echo "Installed. Try:"
-echo "  vspagent auth login kimi"
-echo "  vspagent \"explain this repository\""
-echo
-echo "Repository: https://github.com/${REPO}"
+printf "\n"
+printf "  ${GREEN}✓${RESET} ${BOLD}vspagent ${INSTALLED_VERSION}${RESET} is installed\n"
+printf "  ${DIM}──────────────────────────────────────────────${RESET}\n"
+printf "  ${DIM}binary${RESET}    %s\n" "$ACTUAL_BIN/vspagent"
+printf "  ${DIM}alias${RESET}     %s\n" "$ACTUAL_BIN/vsp"
+printf "  ${DIM}provider${RESET}  Kimi (default, OpenAI-compatible)\n"
+printf "  ${DIM}config${RESET}    ~/.config/vspagent/config.toml\n"
+printf "\n"
+printf "  ${BOLD}Get started${RESET}\n"
+printf "    ${CYAN}vspagent auth login kimi${RESET}\n"
+printf "    ${CYAN}vspagent${RESET}\n"
+printf "\n"
+printf "  ${DIM}docs${RESET}      https://github.com/${REPO}\n"
+
+if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qx "$ACTUAL_BIN"; then
+    printf "\n"
+    printf "  ${YELLOW}Add ${ACTUAL_BIN} to PATH:${RESET}\n"
+    printf "    export PATH=\"%s:\$PATH\"\n" "$ACTUAL_BIN"
+fi
+printf "\n"

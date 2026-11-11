@@ -25,4 +25,5 @@ def test_install_script_uses_uv_and_pins_a_version() -> None:
     assert "uv tool install" in text
     assert "VSPAGENT_VERSION" in text
     assert "git+https://github.com" in text
+    assert "pypi.org/pypi/vspagent" in text
     assert "sudo" not in text
