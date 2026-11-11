@@ -150,4 +150,4 @@ class BaseTool(ABC):
 
 #### 5.2 Direct Vibe-ML-Studio Integration
 - First-class API client package for [Vibe-ML-Studio](file:///home/vishnusureshperumbavoor/Desktop/test/Vibe-ML-Studio).
-- Fine-tuning orchestration: Vibe-ML-Studio dispatches training jobs to `vspagent`, which automatically handles Colab runtime pairing, dataset staging, GPU training execution, and checkpoint downloading.
+- Fine-tuning orchestration: Vibe-ML-Studio dispatches training jobs to the independent `vsptrainagents` project, which handles dataset staging, JarvisLabs GPU execution, quantization, checkpoint download and Hub publishing. `vspagent` remains the Colab/Jarvis execution harness.

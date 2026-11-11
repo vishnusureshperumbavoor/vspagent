@@ -10,7 +10,9 @@
 * **Google Colab via Model Context Protocol (MCP)** (Tesla T4, A100, V100)
 * **JarvisLabs On-Demand Dedicated Cloud GPUs** (NVIDIA A30, A100, H100, RTX 6000 Ada)
 
-Whether you are fine-tuning models, running deep learning inference, or dispatching heavy real-time audio/vision pipelines, `vspagent` acts as your unified execution harness—managing background daemons, MCP protocol bridges, cloud GPU instances, SSH port tunnels, and file synchronization seamlessly.
+Whether you are running deep learning inference, evaluating models, or dispatching heavy real-time audio/vision pipelines, `vspagent` acts as your unified execution harness—managing background daemons, MCP protocol bridges, cloud GPU instances, SSH port tunnels, and file synchronization seamlessly.
+
+> **Fine-tuning moved.** Dataset preparation, LoRA fine-tuning, GGUF quantization and Hugging Face publishing now live in the independent [vsptrainagents](../vsptrainagents) project.
 
 ---
 
@@ -148,57 +150,23 @@ vspagent jarvis pause
 
 ---
 
-### 5. Dataset Preprocessing & Sanitization (`vspagent dataset`)
+### 5. Fine-Tuning, Quantization & HF Publishing
 
-Quickly convert raw messaging exports (e.g. WhatsApp) into clean, multi-turn ChatML JSONL datasets with automated PII masking:
-
-```bash
-# Parse WhatsApp text export into ChatML dialogues (masks phone numbers and emails automatically)
-vspagent dataset parse-whatsapp \
-    -i ./assets/whatsapp_chats/ \
-    -a "Vishnu Suresh Perumbavoor" \
-    -o ./train_persona.jsonl
-```
-
-Deduplicate and sanitize an existing dataset before training (drops repeated FAQ blocks, code dumps, oversized URLs, and short filler turns):
+This harness no longer ships a trainer. Dataset preparation, LoRA fine-tuning,
+GGUF quantization and Hugging Face publishing are maintained in the separate
+[vsptrainagents](../vsptrainagents) project, which vendors the same JarvisLabs
+transport and can be installed on its own:
 
 ```bash
-vspagent dataset clean \
-    -i ./train_persona.jsonl \
-    -o ./train_persona_clean.jsonl
+pip install vsptrainagents
+
+vsptrainagents dataset parse-whatsapp -i ./assets/whatsapp_chats/ -a "Your Name"
+vsptrainagents train --backend jarvis --dataset ./train_persona.jsonl --plan
 ```
 
 ---
 
-### 6. Automated Model Fine-Tuning, Quantization & HF Publishing (`vspagent train`)
-
-Fine-tune LLMs natively without system prompts, merge LoRA adapters, convert to quantized GGUF (`q4_k_m`), and publish directly to Hugging Face Hub in a single command:
-
-```bash
-# Fine-tune on JarvisLabs Cloud GPU (NVIDIA A30), quantize to GGUF, push to Hub, and auto-pause
-vspagent train \
-    --backend jarvis \
-    --gpu A30 \
-    --dataset ./train_persona.jsonl \
-    --base-model Qwen/Qwen2.5-0.5B-Instruct \
-    --epochs 3 \
-    --batch-size 4 \
-    --grad-accum 2 \
-    --lr 2e-4 \
-    --quantize q4_k_m \
-    --push-to-hf vishnusureshperumbavoor/vsp-persona-qwen-0.5b \
-    --auto-pause
-
-# Or run locally on CPU/CUDA
-vspagent train \
-    --backend local \
-    --dataset ./train_persona.jsonl \
-    --epochs 3
-```
-
----
-
-### 7. Google Colab MCP CLI & Daemon
+### 6. Google Colab MCP CLI & Daemon
 
 ```bash
 # Discover available Google / Chrome profiles

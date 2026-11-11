@@ -25,8 +25,6 @@ except ImportError:
 
 from vspagent import __version__
 from vspagent.colab.profiles import list_chrome_accounts
-from vspagent.dataset import parse_whatsapp_chats, clean_jsonl
-from vspagent.trainer import train_persona
 from vspagent.jarvis import (
     JarvisLabsClient,
     list_active_tunnels,
@@ -865,135 +863,6 @@ def cmd_jarvis_untunnel(args):
         _print_info(f"No active tunnel found on local port {args.local_port}.")
 
 
-def cmd_dataset_parse_whatsapp(args):
-    """Parse WhatsApp chat exports into clean, multi-turn ChatML JSONL."""
-    _print_info(f"Parsing WhatsApp chats from '{args.input}' for assistant '{args.assistant}'...")
-    dialogues = parse_whatsapp_chats(
-        input_path=args.input,
-        assistant_names=args.assistant,
-        output_path=args.output,
-        mask_private_info=not args.no_mask_pii,
-        max_turns=args.max_turns,
-    )
-    _print_success(f"Generated {len(dialogues)} multi-turn dialogue samples -> {args.output}")
-
-
-def cmd_dataset_clean(args):
-    """Clean, deduplicate and sanitize an existing ChatML JSONL dataset."""
-    _print_info(f"Cleaning dataset '{args.input}'...")
-    report = clean_jsonl(
-        input_path=args.input,
-        output_path=args.output,
-        max_chars=args.max_chars,
-        min_2turn_answer=args.min_2turn_answer,
-        max_url_len=args.max_url_len,
-        max_turns=args.max_turns,
-        drop_code=not args.keep_code,
-        drop_patterns=args.drop_regex,
-        dedupe_by=args.dedupe_by,
-        max_answer_variants=args.max_answer_variants,
-        mask_private_info=args.mask_pii,
-        shuffle=args.shuffle,
-        seed=args.seed,
-    )
-    if HAS_RICH:
-        table = Table(title="Dataset Cleaning Report", show_header=True)
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", justify="right", style="green")
-        order = [
-            "input_samples", "output_samples", "invalid", "too_many_turns",
-            "code", "too_long", "long_url", "blocked_pattern", "short_2turn",
-            "duplicate_exact", "duplicate_answer", "parse_errors",
-            "avg_turns_before", "avg_turns_after", "unique_assistant_messages",
-        ]
-        for key in order:
-            if key in report and report[key] is not None:
-                table.add_row(key, str(report[key]))
-        console.print(table)
-    else:
-        for key, value in report.items():
-            print(f"{key}: {value}")
-    if report.get("output_path"):
-        _print_success(f"Wrote {report['output_samples']} samples -> {report['output_path']}")
-    else:
-        _print_success(f"Kept {report['output_samples']} samples (dry run, no output written)")
-
-
-def cmd_train(args):
-    """Run model fine-tuning locally or on JarvisLabs GPU."""
-    if args.backend == "local":
-        _print_info(f"Starting local fine-tuning on '{args.base_model}' with dataset '{args.dataset}'...")
-        res = train_persona(
-            dataset_path=args.dataset,
-            base_model=args.base_model,
-            output_dir=args.output_dir,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            grad_accum=args.grad_accum,
-            lr=args.lr,
-            repo_id=args.push_to_hf,
-            hf_token=args.hf_token,
-            quant_type=args.quantize,
-        )
-        _print_success(f"Training complete! Merged model: {res['merged_dir']}")
-        if res.get("gguf_path"):
-            _print_success(f"GGUF artifact: {res['gguf_path']}")
-    elif args.backend == "jarvis":
-        _print_info(f"Setting up JarvisLabs Cloud GPU ({args.gpu}) for fine-tuning...")
-        client = JarvisLabsClient()
-        active = client.get_active_instance()
-        if not active or str(active.get("status")).lower() != "running":
-            _print_info(f"Provisioning new {args.gpu} GPU instance...")
-            active = client.create(gpu_type=args.gpu, name="persona-trainer")
-            _print_success(f"Instance active: {active.get('machine_id')} ({active.get('host')})")
-
-        # Sync dataset
-        _print_info(f"Uploading dataset '{args.dataset}' to remote GPU...")
-        client.sync_up(args.dataset, remote_path="/home/train_dataset.jsonl")
-
-        # Generate remote trainer script
-        hf_token_val = args.hf_token or os.environ.get("HF_TOKEN", "")
-        remote_code = f"""
-from vspagent.trainer import train_persona
-train_persona(
-    dataset_path='train_dataset.jsonl',
-    base_model='{args.base_model}',
-    output_dir='{args.output_dir}',
-    epochs={args.epochs},
-    batch_size={args.batch_size},
-    grad_accum={args.grad_accum},
-    lr={args.lr},
-    repo_id='{args.push_to_hf or ""}',
-    hf_token='{hf_token_val}',
-    quant_type='{args.quantize}',
-)
-"""
-        runner_path = "/tmp/remote_train_runner.py"
-        with open(runner_path, "w", encoding="utf-8") as f:
-            f.write(remote_code)
-
-        client.sync_up(runner_path, remote_path="/home/remote_train_runner.py")
-
-        _print_info("Installing required training packages on remote GPU...")
-        client.exec("pip install -q transformers peft trl datasets accelerate bitsandbytes huggingface_hub cmake gguf")
-
-        _print_info("Launching training job on GPU...")
-        exit_code, out = client.exec("python -u remote_train_runner.py", stream=True)
-
-        if args.auto_pause:
-            _print_info("Auto-pausing JarvisLabs instance to halt compute billing...")
-            try:
-                client.pause()
-                _print_success("Instance paused.")
-            except Exception as e:
-                _print_info(f"Pause notice: {e}")
-
-        if exit_code == 0:
-            _print_success("Remote training job completed successfully!")
-        else:
-            _print_error(f"Training exited with code {exit_code}")
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="vspagent",
@@ -1143,50 +1012,6 @@ def main():
     untunnel_p = jarvis_subs.add_parser("untunnel", help="Stop an SSH port tunnel")
     untunnel_p.add_argument("local_port", type=int, help="Local port to disconnect")
 
-    # dataset commands
-    dataset_parser = subparsers.add_parser("dataset", help="Dataset preprocessing and persona extraction")
-    dataset_subs = dataset_parser.add_subparsers(dest="dataset_command")
-
-    # parse-whatsapp
-    wa_p = dataset_subs.add_parser("parse-whatsapp", help="Parse WhatsApp chat exports into ChatML JSONL")
-    wa_p.add_argument("-i", "--input", required=True, help="Path to WhatsApp .txt file or directory containing exports")
-    wa_p.add_argument("-a", "--assistant", required=True, help="Sender name to treat as assistant persona (comma-separated for aliases)")
-    wa_p.add_argument("-o", "--output", default="train_persona.jsonl", help="Output .jsonl path (default: train_persona.jsonl)")
-    wa_p.add_argument("--no-mask-pii", action="store_true", help="Disable masking of phone numbers and emails")
-    wa_p.add_argument("--max-turns", type=int, default=24, help="Maximum dialogue turns per sample (default: 24)")
-
-    # clean
-    clean_p = dataset_subs.add_parser("clean", help="Clean, dedupe and sanitize a ChatML JSONL dataset")
-    clean_p.add_argument("-i", "--input", required=True, help="Path to input ChatML .jsonl dataset")
-    clean_p.add_argument("-o", "--output", help="Output .jsonl path (omit for a dry-run report)")
-    clean_p.add_argument("--max-chars", type=int, default=700, help="Drop samples with any message longer than this (default: 700)")
-    clean_p.add_argument("--min-2turn-answer", type=int, default=8, help="Drop 2-turn samples whose assistant reply is shorter than this (default: 8)")
-    clean_p.add_argument("--max-url-len", type=int, default=100, help="Drop samples containing a URL longer than this (default: 100)")
-    clean_p.add_argument("--max-turns", type=int, default=8, help="Drop samples with more than this many turns (default: 8)")
-    clean_p.add_argument("--keep-code", action="store_true", help="Keep samples that contain code blocks/source code")
-    clean_p.add_argument("--dedupe-by", choices=["answer", "exact", "none"], default="answer", help="Deduplication strategy (default: answer)")
-    clean_p.add_argument("--max-answer-variants", type=int, default=3, help="Keep at most N distinct user prompts per identical answer (default: 3)")
-    clean_p.add_argument("--drop-regex", action="append", help="Additional regex; samples matching it are dropped (repeatable)")
-    clean_p.add_argument("--mask-pii", action="store_true", help="Mask phone numbers and emails in the output")
-    clean_p.add_argument("--shuffle", action="store_true", help="Shuffle the cleaned output")
-    clean_p.add_argument("--seed", type=int, default=42, help="Shuffle seed (default: 42)")
-
-    # train command
-    train_parser = subparsers.add_parser("train", help="End-to-end model fine-tuning, quantization & HF publisher")
-    train_parser.add_argument("-d", "--dataset", required=True, help="Path to jsonl training dataset")
-    train_parser.add_argument("-m", "--base-model", default="Qwen/Qwen2.5-0.5B-Instruct", help="Base model identifier (default: Qwen/Qwen2.5-0.5B-Instruct)")
-    train_parser.add_argument("-o", "--output-dir", default="./vsp_model_output", help="Output directory (default: ./vsp_model_output)")
-    train_parser.add_argument("-e", "--epochs", type=int, default=3, help="Number of training epochs (default: 3)")
-    train_parser.add_argument("-b", "--batch-size", type=int, default=4, help="Per-device batch size (default: 4)")
-    train_parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation steps (default: 2)")
-    train_parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate (default: 2e-4)")
-    train_parser.add_argument("-q", "--quantize", default="q4_k_m", help="GGUF quantization format (default: q4_k_m)")
-    train_parser.add_argument("--push-to-hf", help="Hugging Face repo ID to push model (e.g. username/repo-name)")
-    train_parser.add_argument("--hf-token", help="Hugging Face write token")
-    train_parser.add_argument("--backend", choices=["local", "jarvis"], default="local", help="Compute backend (local or jarvis)")
-    train_parser.add_argument("--gpu", default="A30", help="GPU type if using jarvis backend (default: A30)")
-    train_parser.add_argument("--auto-pause", action="store_true", default=True, help="Automatically pause cloud GPU after completion")
-
     args = parser.parse_args()
 
     if args.subcommand == "colab":
@@ -1241,15 +1066,6 @@ def main():
         cmd_daemon(args)
     elif args.subcommand == "serve":
         cmd_serve(args)
-    elif args.subcommand == "dataset":
-        if args.dataset_command == "parse-whatsapp":
-            cmd_dataset_parse_whatsapp(args)
-        elif args.dataset_command == "clean":
-            cmd_dataset_clean(args)
-        else:
-            dataset_parser.print_help()
-    elif args.subcommand == "train":
-        cmd_train(args)
     else:
         parser.print_help()
 

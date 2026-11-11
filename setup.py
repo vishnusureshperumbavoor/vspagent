@@ -7,7 +7,7 @@ setup(
     name="vspagent",
     version="3.3.0",
     author="Vishnu Suresh Perumbavoor",
-    description="Universal Google Colab MCP, JarvisLabs Cloud GPU, Persona Training & Dataset Engine.",
+    description="Universal Google Colab MCP and JarvisLabs Cloud GPU Agent Harness.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/vishnusureshperumbavoor/vspagent",
@@ -40,5 +40,5 @@ setup(
             "vspagent=vspagent.cli:main",
         ],
     },
-    keywords="colab mcp model-context-protocol gpu fine-tuning cloud-execution ai-agent",
+    keywords="colab mcp model-context-protocol gpu cloud-execution ai-agent",
 )
