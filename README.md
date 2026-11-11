@@ -31,10 +31,11 @@ curl -fsSL https://github.com/vishnusureshperumbavoor/vspagent/releases/latest/d
   | VSPAGENT_VERSION=4.0.0 sh
 ```
 
-If the release asset is not attached yet, use the repo script:
+If the release asset is not attached yet, use the repo script (`HEAD` follows the
+default branch):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vishnusureshperumbavoor/vspagent/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/vishnusureshperumbavoor/vspagent/HEAD/install.sh | sh
 ```
 
 ### pip / uv

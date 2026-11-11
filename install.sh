@@ -12,6 +12,10 @@ set -euo pipefail
 REPO="${VSPAGENT_REPO:-vishnusureshperumbavoor/vspagent}"
 VERSION="${VSPAGENT_VERSION:-4.0.0}"
 BIN_DIR="${VSPAGENT_BIN_DIR:-$HOME/.local/bin}"
+GIT_REF="${VSPAGENT_GIT_REF:-v${VERSION}}"
+if [ "$VERSION" = "latest" ]; then
+    GIT_REF="${VSPAGENT_GIT_REF:-master}"
+fi
 
 usage() {
     cat <<'EOF'
@@ -65,7 +69,14 @@ else
 fi
 
 echo "Installing ${PACKAGE} from PyPI with uv ..."
-uv tool install --force "$PACKAGE"
+if ! uv tool install --force "$PACKAGE"; then
+    echo
+    echo "PyPI does not have ${PACKAGE} yet; installing from GitHub (${GIT_REF}) ..."
+    if ! uv tool install --force "vspagent @ git+https://github.com/${REPO}.git@${GIT_REF}"; then
+        echo "Git tag ${GIT_REF} failed; trying the default branch ..." >&2
+        uv tool install --force "vspagent @ git+https://github.com/${REPO}.git@master"
+    fi
+fi
 
 mkdir -p "$BIN_DIR"
 if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
